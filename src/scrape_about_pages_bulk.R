@@ -41,6 +41,11 @@ safe_get_about <- function(url) {
   })
 }
 
+shorten <- function(x, n = 80L) {
+  x <- as.character(x)
+  ifelse(nchar(x) > n, paste0(substr(x, 1, n - 3L), "..."), x)
+}
+
 main <- function() {
   cfg <- parse_args(commandArgs(trailingOnly = TRUE))
   dir.create(dirname(cfg$out_file), recursive = TRUE, showWarnings = FALSE)
@@ -76,11 +81,25 @@ main <- function() {
 
   n <- nrow(cand)
   chunks <- split(seq_len(n), ceiling(seq_len(n) / cfg$batch_size))
+  pb <- txtProgressBar(min = 0, max = n, style = 3)
+  completed <- 0L
 
   for (k in seq_along(chunks)) {
     idx <- chunks[[k]]
     part <- copy(cand[idx])
-    part[, about_page_text := vapply(preferred_link, safe_get_about, character(1))]
+    scraped <- character(nrow(part))
+
+    for (j in seq_len(nrow(part))) {
+      ein_j <- part$ein[[j]]
+      org_j <- shorten(part$irs_name_raw[[j]], 90L)
+      url_j <- shorten(part$preferred_link[[j]], 100L)
+      message(sprintf("Scraping [%s/%s] EIN=%s | %s | %s", completed + 1L, n, ein_j, org_j, url_j))
+      scraped[[j]] <- safe_get_about(part$preferred_link[[j]])
+      completed <- completed + 1L
+      setTxtProgressBar(pb, completed)
+    }
+
+    part[, about_page_text := scraped]
 
     append_mode <- file.exists(cfg$out_file) && !cfg$overwrite
     if (append_mode) fwrite(part, cfg$out_file, append = TRUE, quote = TRUE)
@@ -89,8 +108,10 @@ main <- function() {
       cfg$overwrite <- FALSE
     }
 
-    message(sprintf("Scraped batch %s/%s (rows %s-%s)", k, length(chunks), min(idx), max(idx)))
+    ok_n <- sum(!grepl("^SCRAPE_ERROR:", part$about_page_text) & !is.na(part$about_page_text) & nchar(part$about_page_text) > 0)
+    message(sprintf("Completed batch %s/%s (rows %s-%s). Successful pages in batch: %s", k, length(chunks), min(idx), max(idx), ok_n))
   }
+  close(pb)
 
   message(sprintf("Done scraping %s rows.", n))
 }

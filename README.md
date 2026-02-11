@@ -258,5 +258,15 @@ Run-all script:
 ./run_pipeline_01_06_and_shutdown.sh
 ```
 
+Resume behavior:
+- The runner writes phase checkpoints to `outputs/pipeline_state/*.done`.
+- If interrupted, re-running the script skips completed phases and resumes from the next unfinished phase.
+- Bulk webpage scraping is resumable by design and appends progress instead of restarting.
+- To force a clean rerun from scratch:
+
+```bash
+FORCE_RERUN=true ./run_pipeline_01_06_and_shutdown.sh
+```
+
 Current note:
 - This is a testing stage for pipeline construction and documentation; execution and threshold tuning are handled in the next iteration.

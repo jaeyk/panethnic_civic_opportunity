@@ -2,6 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
+.env
+.env.local
+.Renviron
 .DS_Store
 
 # Data and generated artifacts (keep local, do not commit)
