@@ -1,198 +1,263 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
+import json
 import os
-import sys
 from typing import Dict, List
-
-import pandas as pd
-import requests
-
-
-ACS1_START_YEAR = 2005
-ACS5_START_YEAR = 2009
-CURRENT_YEAR = 2025
-
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Build Asian/Latino population series from Census APIs and optional historical file.")
+    p = argparse.ArgumentParser(description="Build Asian/Latino population series from Census APIs using an explicit variable map.")
     p.add_argument("--output", default="outputs/population/population_series.csv")
     p.add_argument("--historical-input", default="raw_data/population_manual_1980_2008.csv")
     p.add_argument("--places-input", default="misc/selected_places.csv")
+    p.add_argument("--variable-map", default="misc/census_variable_map.csv")
     p.add_argument("--api-key", default=os.getenv("CENSUS_API_KEY", ""))
     p.add_argument("--skip-api", action="store_true", help="Use only historical/local input files.")
     return p.parse_args()
 
 
-def call_census_api(url: str, params: Dict[str, str]) -> pd.DataFrame:
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    if len(data) < 2:
-      return pd.DataFrame()
-    return pd.DataFrame(data[1:], columns=data[0])
+def to_int(x):
+    try:
+        return int(x)
+    except Exception:
+        return None
 
 
-def fetch_national_acs(api_key: str) -> pd.DataFrame:
-    rows: List[pd.DataFrame] = []
-    for year in range(ACS1_START_YEAR, CURRENT_YEAR + 1):
-        url = f"https://api.census.gov/data/{year}/acs/acs1"
-        params = {
-            "get": "NAME,B03002_001E,B03002_006E,B03002_012E",
-            "for": "us:1",
-        }
+def read_csv_rows(path: str) -> List[Dict[str, str]]:
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def write_csv_rows(path: str, rows: List[Dict[str, str]], fieldnames: List[str]):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fieldnames})
+
+
+def call_census_api(url: str, params: Dict[str, str]) -> List[Dict[str, str]]:
+    qs = urlencode(params)
+    with urlopen(f"{url}?{qs}", timeout=30) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    if len(payload) < 2:
+        return []
+    header = payload[0]
+    rows = []
+    for row in payload[1:]:
+        rows.append({header[i]: str(row[i]) for i in range(min(len(header), len(row)))})
+    return rows
+
+
+def load_variable_map(path: str) -> List[Dict[str, str]]:
+    rows = read_csv_rows(path)
+    if not rows:
+        return []
+    needed = {"source_id", "year_start", "year_end", "geo_level", "dataset", "var_total", "var_asian", "var_latino"}
+    if not needed.issubset(set(rows[0].keys())):
+        return []
+    return rows
+
+
+def expand_map_rows(varmap_rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    out = []
+    for r in varmap_rows:
+        ys = to_int(r.get("year_start", ""))
+        ye = to_int(r.get("year_end", ""))
+        if ys is None or ye is None:
+            continue
+        for year in range(ys, ye + 1):
+            rr = dict(r)
+            rr["year"] = str(year)
+            out.append(rr)
+    return out
+
+
+def fetch_national_from_map(varmap_rows: List[Dict[str, str]], api_key: str) -> List[Dict[str, str]]:
+    out = []
+    for m in varmap_rows:
+        if m.get("geo_level") != "national":
+            continue
+        year = m.get("year", "")
+        dataset = m.get("dataset", "")
+        vtot = m.get("var_total", "")
+        vas = m.get("var_asian", "")
+        vlat = m.get("var_latino", "")
+        if not year or not dataset or not vtot or not vas or not vlat:
+            continue
+
+        url = f"https://api.census.gov/data/{year}/{dataset}"
+        params = {"get": f"NAME,{vtot},{vas},{vlat}", "for": "us:1"}
         if api_key:
             params["key"] = api_key
 
         try:
-            df = call_census_api(url, params)
+            rows = call_census_api(url, params)
         except Exception:
             continue
 
-        if df.empty:
-            continue
-
-        df["year"] = year
-        df = df.rename(
-            columns={
-                "NAME": "geo_name",
-                "us": "geo_id",
-                "B03002_001E": "population_total",
-                "B03002_006E": "population_asian",
-                "B03002_012E": "population_latino",
-            }
-        )
-        df["geo_level"] = "national"
-        rows.append(df)
-
-    if not rows:
-        return pd.DataFrame()
-
-    out = pd.concat(rows, ignore_index=True)
-    for c in ["population_total", "population_asian", "population_latino"]:
-        out[c] = pd.to_numeric(out[c], errors="coerce")
+        for r in rows:
+            out.append(
+                {
+                    "year": str(year),
+                    "geo_level": "national",
+                    "geo_id": r.get("us", "1"),
+                    "geo_name": r.get("NAME", "United States"),
+                    "population_total": r.get(vtot, ""),
+                    "population_asian": r.get(vas, ""),
+                    "population_latino": r.get(vlat, ""),
+                    "source": f"{dataset}_api",
+                    "source_id": m.get("source_id", ""),
+                    "source_dataset": dataset,
+                    "var_total": vtot,
+                    "var_asian": vas,
+                    "var_latino": vlat,
+                }
+            )
     return out
 
 
-def fetch_selected_places_acs(places_csv: str, api_key: str) -> pd.DataFrame:
-    if not os.path.exists(places_csv):
-        return pd.DataFrame()
+def fetch_selected_places_from_map(places_csv: str, varmap_rows: List[Dict[str, str]], api_key: str) -> List[Dict[str, str]]:
+    places = read_csv_rows(places_csv)
+    if not places:
+        return []
 
-    places = pd.read_csv(places_csv)
     need = {"state_fips", "place_fips", "geo_name"}
-    if not need.issubset(set(places.columns)):
-        return pd.DataFrame()
+    if not need.issubset(set(places[0].keys())):
+        return []
 
-    frames: List[pd.DataFrame] = []
-    for year in range(ACS5_START_YEAR, CURRENT_YEAR + 1):
-        url = f"https://api.census.gov/data/{year}/acs/acs5"
-        for _, row in places.iterrows():
+    out = []
+    for m in varmap_rows:
+        if m.get("geo_level") != "place":
+            continue
+        year = m.get("year", "")
+        dataset = m.get("dataset", "")
+        vtot = m.get("var_total", "")
+        vas = m.get("var_asian", "")
+        vlat = m.get("var_latino", "")
+        if not year or not dataset or not vtot or not vas or not vlat:
+            continue
+
+        url = f"https://api.census.gov/data/{year}/{dataset}"
+        for p in places:
+            sf = to_int(p.get("state_fips", ""))
+            pf = to_int(p.get("place_fips", ""))
+            if sf is None or pf is None:
+                continue
             params = {
-                "get": "NAME,B03002_001E,B03002_006E,B03002_012E",
-                "for": f"place:{int(row['place_fips']):05d}",
-                "in": f"state:{int(row['state_fips']):02d}",
+                "get": f"NAME,{vtot},{vas},{vlat}",
+                "for": f"place:{pf:05d}",
+                "in": f"state:{sf:02d}",
             }
             if api_key:
                 params["key"] = api_key
-
             try:
-                df = call_census_api(url, params)
+                rows = call_census_api(url, params)
             except Exception:
                 continue
-
-            if df.empty:
-                continue
-
-            df["year"] = year
-            df["geo_name_manual"] = row["geo_name"]
-            if "region_focus" in places.columns:
-                df["region_focus"] = row.get("region_focus")
-            frames.append(df)
-
-    if not frames:
-        return pd.DataFrame()
-
-    out = pd.concat(frames, ignore_index=True)
-    out = out.rename(
-        columns={
-            "NAME": "geo_name",
-            "B03002_001E": "population_total",
-            "B03002_006E": "population_asian",
-            "B03002_012E": "population_latino",
-            "state": "state_fips",
-            "place": "place_fips",
-        }
-    )
-    out["geo_id"] = out["state_fips"].astype(str).str.zfill(2) + out["place_fips"].astype(str).str.zfill(5)
-    out["geo_level"] = "place"
-
-    for c in ["population_total", "population_asian", "population_latino"]:
-        out[c] = pd.to_numeric(out[c], errors="coerce")
-
+            for r in rows:
+                out.append(
+                    {
+                        "year": str(year),
+                        "geo_level": "place",
+                        "geo_id": f"{r.get('state',''):0>2}{r.get('place',''):0>5}",
+                        "geo_name": r.get("NAME", p.get("geo_name", "")),
+                        "population_total": r.get(vtot, ""),
+                        "population_asian": r.get(vas, ""),
+                        "population_latino": r.get(vlat, ""),
+                        "source": f"{dataset}_api",
+                        "source_id": m.get("source_id", ""),
+                        "source_dataset": dataset,
+                        "var_total": vtot,
+                        "var_asian": vas,
+                        "var_latino": vlat,
+                    }
+                )
     return out
 
 
-def load_historical(path: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        return pd.DataFrame()
+def load_historical(path: str) -> List[Dict[str, str]]:
+    rows = read_csv_rows(path)
+    if not rows:
+        return []
 
-    df = pd.read_csv(path)
     needed = {"year", "geo_level", "geo_id", "geo_name", "population_asian", "population_latino"}
-    missing = needed - set(df.columns)
-    if missing:
-        raise ValueError(f"Historical population file missing columns: {sorted(missing)}")
+    if not needed.issubset(set(rows[0].keys())):
+        missing = sorted(list(needed - set(rows[0].keys())))
+        raise ValueError(f"Historical population file missing columns: {missing}")
 
-    if "population_total" not in df.columns:
-        df["population_total"] = pd.NA
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "year": r.get("year", ""),
+                "geo_level": r.get("geo_level", ""),
+                "geo_id": r.get("geo_id", ""),
+                "geo_name": r.get("geo_name", ""),
+                "population_total": r.get("population_total", ""),
+                "population_asian": r.get("population_asian", ""),
+                "population_latino": r.get("population_latino", ""),
+                "source": r.get("source", "manual_historical"),
+                "source_id": r.get("source_id", "manual_historical"),
+                "source_dataset": r.get("source_dataset", ""),
+                "var_total": r.get("var_total", ""),
+                "var_asian": r.get("var_asian", ""),
+                "var_latino": r.get("var_latino", ""),
+            }
+        )
+    return out
 
-    return df
+
+def dedupe_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    rows_sorted = sorted(rows, key=lambda r: (r.get("geo_level", ""), r.get("geo_id", ""), to_int(r.get("year", "")) or -1, r.get("source", "")))
+    seen = {}
+    for r in rows_sorted:
+        key = (r.get("year", ""), r.get("geo_level", ""), r.get("geo_id", ""))
+        seen[key] = r
+    return [seen[k] for k in sorted(seen.keys(), key=lambda x: (x[1], x[2], to_int(x[0]) or -1))]
 
 
 def main():
     args = parse_args()
 
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-
-    pieces: List[pd.DataFrame] = []
-
-    hist = load_historical(args.historical_input)
-    if not hist.empty:
-        hist["source"] = hist.get("source", "manual_historical")
-        pieces.append(hist)
+    rows: List[Dict[str, str]] = []
+    rows.extend(load_historical(args.historical_input))
 
     if not args.skip_api:
-        national = fetch_national_acs(args.api_key)
-        if not national.empty:
-            national["source"] = "acs1_api"
-            pieces.append(national)
+        varmap = load_variable_map(args.variable_map)
+        varmap = expand_map_rows(varmap)
+        rows.extend(fetch_national_from_map(varmap, args.api_key))
+        rows.extend(fetch_selected_places_from_map(args.places_input, varmap, args.api_key))
 
-        places = fetch_selected_places_acs(args.places_input, args.api_key)
-        if not places.empty:
-            places["source"] = "acs5_api"
-            pieces.append(places)
+    fields = [
+        "year",
+        "geo_level",
+        "geo_id",
+        "geo_name",
+        "population_total",
+        "population_asian",
+        "population_latino",
+        "source",
+        "source_id",
+        "source_dataset",
+        "var_total",
+        "var_asian",
+        "var_latino",
+    ]
 
-    if not pieces:
-        pd.DataFrame(
-            columns=[
-                "year",
-                "geo_level",
-                "geo_id",
-                "geo_name",
-                "population_total",
-                "population_asian",
-                "population_latino",
-                "source",
-            ]
-        ).to_csv(args.output, index=False)
+    if not rows:
+        write_csv_rows(args.output, [], fields)
         print("No population data retrieved; wrote empty output schema.")
         return
 
-    out = pd.concat(pieces, ignore_index=True)
-    out = out.sort_values(["geo_level", "geo_id", "year"]).drop_duplicates(
-        subset=["year", "geo_level", "geo_id"], keep="last"
-    )
-
-    out.to_csv(args.output, index=False)
+    out = dedupe_rows(rows)
+    write_csv_rows(args.output, out, fields)
     print(f"Wrote {len(out):,} rows to {args.output}")
 
 

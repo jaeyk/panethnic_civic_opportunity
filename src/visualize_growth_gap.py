@@ -2,9 +2,14 @@
 
 import argparse
 import os
+import sys
 
-import matplotlib.pyplot as plt
-import pandas as pd
+try:
+    import matplotlib.pyplot as plt
+    import pandas as pd
+except Exception as e:
+    print(f"Skipping Python visualization: missing dependency ({e}). Use src/visualize_growth_gap.R instead.")
+    sys.exit(0)
 
 
 def parse_args():
@@ -143,11 +148,7 @@ def make_place_plot(org_df: pd.DataFrame, pop: pd.DataFrame, selected_places_pat
 
     merged["orgs_per_100k"] = merged["cumulative_orgs"] / merged["population"] * 100000
 
-    focus = selected.copy()
-    if "region_focus" in focus.columns:
-        focus = focus[focus["region_focus"].str.lower().isin(["midwest", "south"])]
-
-    focus_geo = set(focus["geo_id"].astype(str))
+    focus_geo = set(selected["geo_id"].astype(str))
     merged = merged[merged["geo_id"].astype(str).isin(focus_geo)]
     if merged.empty:
         return

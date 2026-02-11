@@ -1,0 +1,9 @@
+source_id,year_start,year_end,geo_level,dataset,var_total,var_asian,var_latino
+acs1_b03002,2005,2025,national,acs/acs1,B03002_001E,B03002_006E,B03002_012E
+acs5_b03002,2009,2025,place,acs/acs5,B03002_001E,B03002_006E,B03002_012E
+dec2000_sf1,2000,2000,national,dec/sf1,P001001,P008005,P004003
+dec2010_sf1,2010,2010,national,dec/sf1,P001001,P003006,P004003
+dec2020_pl,2020,2020,national,dec/pl,P1_001N,P1_006N,P2_002N
+dec2000_sf1_place,2000,2000,place,dec/sf1,P001001,P008005,P004003
+dec2010_sf1_place,2010,2010,place,dec/sf1,P001001,P003006,P004003
+dec2020_pl_place,2020,2020,place,dec/pl,P1_001N,P1_006N,P2_002N

@@ -117,9 +117,7 @@ save_place_plots <- function(org_dt, pop_dt, selected_places_path, out_dir) {
   sel[, city_norm := toupper(trimws(city))]
   sel[, state_norm := toupper(trimws(state_abbr))]
 
-  if ("region_focus" %in% names(sel)) {
-    sel <- sel[tolower(region_focus) %in% c("midwest", "south")]
-  }
+  # Keep all regions; no regional filter is applied.
 
   org <- org_dt[!is.na(year) & panethnic_group %in% c("asian", "latino")]
   org[, city_norm := toupper(trimws(irs_city))]

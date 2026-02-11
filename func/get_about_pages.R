@@ -41,8 +41,8 @@ url_exists <- function(url,
                        non_2xx_return_value = FALSE,
                        quiet = TRUE,
                        timeout_thres = 10) {
-  sHEAD <- safely(HEAD)
-  sGET <- safely(GET)
+  sHEAD <- purrr::safely(httr::HEAD)
+  sGET <- purrr::safely(httr::GET)
   
   # Try HEAD first since it's lightweight
   res <- sHEAD(url, config(
@@ -110,16 +110,16 @@ extract_about_links <- function(base_url, timeout_thres = 10) {
   
   # Timeout to prevent hanging on unreachable/very slow websites
   if (url_exists(base_url, timeout_thres = timeout_thres) == FALSE) {
-    stop(glue("This URL is not responding ({timeout_thres} seconds timeout)."))
+    stop(glue::glue("This URL is not responding ({timeout_thres} seconds timeout)."))
   }
   
   response <- GET(base_url, config(ssl_verifypeer = FALSE, timeout = 10, followlocation = TRUE))
   
   # no-encoding issues from the server
-  possible_read <- possibly(read_html, otherwise = "This URL is broken.")
+  possible_read <- purrr::possibly(xml2::read_html, otherwise = "This URL is broken.")
   
   # encoding issues from the server
-  possible_content <- possibly(~ content(., encoding = "ISO-8859-1"), otherwise = "This URL is broken.")
+  possible_content <- purrr::possibly(~ httr::content(., encoding = "ISO-8859-1"), otherwise = "This URL is broken.")
   
   pg <- if (!str_detect(base_url, ".asp")) {
     possible_read(response)
@@ -163,7 +163,7 @@ extract_about_links <- function(base_url, timeout_thres = 10) {
       about_links <- tibble(
         href = "Base",
         link_text = "The website is built by Wix.",
-        link = about_pages <- glue("{base_url}/{about_pages}")
+        link = about_pages <- glue::glue("{base_url}/{about_pages}")
       )
     }
   }
@@ -205,23 +205,23 @@ extract_about_links <- function(base_url, timeout_thres = 10) {
       }
       
       if (!grepl("/$", base_url)) {
-        base_url <- glue("{base_url}/")
+        base_url <- glue::glue("{base_url}/")
       }
       
       possible_about_urls <- c(
-        glue("{base_url}about"), # About case 1
-        glue("{base_url}about-us"), # About case 2
-        glue("{base_url}who-we-are")
+        glue::glue("{base_url}about"), # About case 1
+        glue::glue("{base_url}about-us"), # About case 2
+        glue::glue("{base_url}who-we-are")
       ) # Who we are case
       
       # Check whether a request for the specific URL works without error
-      if (sum(future_map_int(possible_about_urls, ~ url_exists(., timeout_thres = timeout_thres))) >= 1) {
+      if (sum(furrr::future_map_int(possible_about_urls, ~ url_exists(., timeout_thres = timeout_thres))) >= 1) {
         
         # Dataframe with three columns
         about_links <- tibble(
           href = "Base",
           link_text = "Found without tree search.",
-          link = possible_about_urls[which(future_map_int(possible_about_urls, ~ url_exists(., timeout_thres = timeout_thres)) == 1)]
+          link = possible_about_urls[which(furrr::future_map_int(possible_about_urls, ~ url_exists(., timeout_thres = timeout_thres)) == 1)]
         )
       } else {
         
@@ -283,12 +283,12 @@ find_about_link <- function(base_url) {
     
     # if_else is slightly faster than ifelse
     about_url <- if_else(str_detect(about_links$link_text, "have about page"), # About page problem
-                         glue("This {about_links$link} does not have about page."),
+                         glue::glue("This {about_links$link} does not have about page."),
                          if_else(str_detect(about_links$link_text, "PHP"), # PHP problem
-                                 glue("This {about_links$link} has a PHP error."),
+                                 glue::glue("This {about_links$link} has a PHP error."),
                                  if_else(str_detect(about_links$link_text, "(no tree structure)"), # Flat tree problem
-                                         glue("This {about_links$link} is flat (not tree structure)."),
-                                         glue("This {about_links$link} is broken.") # Broken URL problem
+                                         glue::glue("This {about_links$link} is flat (not tree structure)."),
+                                         glue::glue("This {about_links$link} is broken.") # Broken URL problem
                                  )
                          )
     )
@@ -374,7 +374,7 @@ get_about_page_content <- function(base_url) {
 #'
 #' @export
 get_all_texts <- function(org_url) {
-  safe_parse_by_length <- possibly(parse_by_length, otherwise = NA)
+  safe_parse_by_length <- purrr::possibly(parse_by_length, otherwise = NA)
   
   x <- extract_about_links(org_url) %>%
     mutate(base_url = org_url) %>% rename(url=link)
