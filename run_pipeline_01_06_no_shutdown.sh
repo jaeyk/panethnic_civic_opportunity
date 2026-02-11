@@ -31,6 +31,7 @@ SCRAPE_ABOUT="${SCRAPE_ABOUT:-false}"
 SCRAPE_LIMIT="${SCRAPE_LIMIT:-500}"
 CENSUS_API_KEY="${CENSUS_API_KEY:-}"
 SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
+SHUTDOWN_ON_COMPLETE="${SHUTDOWN_ON_COMPLETE:-false}"
 
 mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT"
 
@@ -160,12 +161,17 @@ else
   mark_done "05"
 fi
 
-echo "[06/06] Pipeline completed successfully. Initiating system shutdown."
+echo "[06/06] Pipeline completed successfully."
 mark_done "06"
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  # macOS usually requires elevated privileges for shutdown.
-  sudo shutdown -h +"$SHUTDOWN_DELAY_MIN"
+if [[ "$SHUTDOWN_ON_COMPLETE" == "true" ]]; then
+  echo "Shutdown requested (SHUTDOWN_ON_COMPLETE=true)."
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS usually requires elevated privileges for shutdown.
+    sudo shutdown -h +"$SHUTDOWN_DELAY_MIN"
+  else
+    sudo shutdown -h now
+  fi
 else
-  sudo shutdown -h now
+  echo "Default behavior: no shutdown. Set SHUTDOWN_ON_COMPLETE=true to enable shutdown."
 fi

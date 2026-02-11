@@ -21,6 +21,12 @@ Method documentation:
 - `misc/Kim_et_al-2025-Scientific_Data.pdf` explains the IRS + web data pipeline.
 - `misc/org_data` explains the org-data construction process.
 
+## Output directories
+
+- `processed_data/`: intermediate and pipeline-stage data products (matching, enrichment, population panel, gap tables, ML filtering, topic scoring).
+- `outputs/figures/`: presentation-ready figures.
+- `outputs/tables/`: presentation/export tables (if created in downstream reporting workflows).
+
 ## Org matching and expansion pipeline
 
 Use `src/match_and_expand_orgs.R` to:
@@ -40,18 +46,18 @@ Rscript src/match_and_expand_orgs.R \
   --matching_method linkorgs \
   --linkorgs_algorithm bipartite \
   --fallback_to_fuzzy true \
-  --out_dir outputs/org_matching \
+  --out_dir processed_data/org_matching \
   --match_threshold 0.90 \
   --target_match_rate 0.90 \
   --scrape_about false
 ```
 
 Outputs:
-- `outputs/org_matching/match_summary.csv`
-- `outputs/org_matching/org_to_irs_matches.csv`
-- `outputs/org_matching/org_to_irs_unmatched.csv`
-- `outputs/org_matching/similar_org_candidates.csv`
-- `outputs/org_matching/candidate_about_pages.csv` (only when `--scrape_about true`)
+- `processed_data/org_matching/match_summary.csv`
+- `processed_data/org_matching/org_to_irs_matches.csv`
+- `processed_data/org_matching/org_to_irs_unmatched.csv`
+- `processed_data/org_matching/similar_org_candidates.csv`
+- `processed_data/org_matching/candidate_about_pages.csv` (only when `--scrape_about true`)
 
 ## Project plan (current stage)
 
@@ -59,7 +65,7 @@ Phase 01: Fuzzy match org data to IRS data
 - Goal: match org ground-truth records to IRS records using the organization name field.
 - Target: at least 90% match rate.
 - Approach: LinkOrgs-style probabilistic linkage (paper-aligned) with state/token blocking to control candidate search size; fallback string-distance matching is available.
-- Success check: `outputs/org_matching/match_summary.csv` shows `match_rate >= 0.90`.
+- Success check: `processed_data/org_matching/match_summary.csv` shows `match_rate >= 0.90`.
 
 Phase 02: Expand to additional similar organizations
 - Goal: identify additional IRS organizations similar to org data naming patterns.
@@ -67,12 +73,12 @@ Phase 02: Expand to additional similar organizations
   - direct panethnic names (e.g., Asian American, Latino, Hispanic),
   - ethnic-name organizations likely connected to Asian American/Latino communities,
   - unique-name neighbors flagged by overlap with seed naming patterns.
-- Output: `outputs/org_matching/similar_org_candidates.csv`.
+- Output: `processed_data/org_matching/similar_org_candidates.csv`.
 
 Phase 03: Validate ethnic/unique candidates with website text
 - Goal: reduce false positives among non-direct names.
 - Method: scrape homepage/about-page text for ethnic/unique candidates using `func/get_about_pages.R`.
-- Output: `outputs/org_matching/candidate_about_pages.csv`.
+- Output: `processed_data/org_matching/candidate_about_pages.csv`.
 
 Phase 04: Add civic opportunity and organization type
 - Goal: calculate civic opportunity measures and assign organization type for each matched/expanded Asian American and Latino organization.
@@ -119,10 +125,10 @@ Example (Phase 05 case selection in R):
 
 ```bash
 Rscript src/select_gap_cases.R \
-  --org_enriched outputs/org_enriched/org_civic_enriched.csv \
-  --population outputs/population/population_series.csv \
+  --org_enriched processed_data/org_enriched/org_civic_enriched.csv \
+  --population processed_data/population/population_series.csv \
   --places_input misc/selected_places.csv \
-  --out_dir outputs/gap_analysis \
+  --out_dir processed_data/gap_analysis \
   --start_year 1980 \
   --top_n 5 \
   --urban_cutoff 50000 \
@@ -133,19 +139,19 @@ Example (Phase 05 population pull with variable map):
 
 ```bash
 python3 src/fetch_population_series.py \
-  --output outputs/population/population_series.csv \
+  --output processed_data/population/population_series.csv \
   --historical-input raw_data/population_manual_1980_2008.csv \
   --places-input misc/selected_places.csv \
   --variable-map misc/census_variable_map.csv
 ```
 
 Phase 05 outputs:
-- `outputs/gap_analysis/place_gap_scores.csv`
-- `outputs/gap_analysis/selected_gap_cases.csv`
-- `outputs/gap_analysis/region_gap_scores.csv`
-- `outputs/gap_analysis/urbanicity_gap_scores.csv`
-- `outputs/gap_analysis/selected_places_from_gaps.csv`
-- `outputs/population/population_series.csv` (includes source metadata: `source_id`, `source_dataset`, `var_total`, `var_asian`, `var_latino`)
+- `processed_data/gap_analysis/place_gap_scores.csv`
+- `processed_data/gap_analysis/selected_gap_cases.csv`
+- `processed_data/gap_analysis/region_gap_scores.csv`
+- `processed_data/gap_analysis/urbanicity_gap_scores.csv`
+- `processed_data/gap_analysis/selected_places_from_gaps.csv`
+- `processed_data/population/population_series.csv` (includes source metadata: `source_id`, `source_dataset`, `var_total`, `var_asian`, `var_latino`)
 
 Phase 06: Visualization and communication
 - Goal: visualize population growth, organization growth, and representation gaps at both national and local levels.
@@ -165,10 +171,10 @@ Example (Phase 06 in R):
 
 ```bash
 Rscript src/visualize_growth_gap.R \
-  --org_enriched outputs/org_enriched/org_civic_enriched.csv \
-  --population outputs/population/population_series.csv \
-  --selected_places outputs/gap_analysis/selected_places_from_gaps.csv \
-  --gap_scores outputs/gap_analysis/place_gap_scores.csv \
+  --org_enriched processed_data/org_enriched/org_civic_enriched.csv \
+  --population processed_data/population/population_series.csv \
+  --selected_places processed_data/gap_analysis/selected_places_from_gaps.csv \
+  --gap_scores processed_data/gap_analysis/place_gap_scores.csv \
   --out_dir outputs/figures
 ```
 
@@ -185,12 +191,12 @@ Phase 07: Supervised ML validation and filtering (ground truth + scraped text)
 - Script:
   - `src/train_validate_panethnic_ml.R`
 - Core outputs:
-  - `outputs/ml_validation/cv_model_metrics.csv`
-  - `outputs/ml_validation/cv_model_performance.png`
-  - `outputs/ml_validation/model_selection.csv`
-  - `outputs/ml_validation/candidate_predictions_with_ml.csv`
-  - `outputs/ml_validation/candidate_predictions_pass_ml_filter.csv`
-  - `outputs/ml_validation/candidate_predictions_fail_ml_filter.csv`
+  - `processed_data/ml_validation/cv_model_metrics.csv`
+  - `processed_data/ml_validation/cv_model_performance.png`
+  - `processed_data/ml_validation/model_selection.csv`
+  - `processed_data/ml_validation/candidate_predictions_with_ml.csv`
+  - `processed_data/ml_validation/candidate_predictions_pass_ml_filter.csv`
+  - `processed_data/ml_validation/candidate_predictions_fail_ml_filter.csv`
 
 Example (Phase 07):
 
@@ -198,10 +204,10 @@ Example (Phase 07):
 Rscript src/train_validate_panethnic_ml.R \
   --asian_input raw_data/org_data_ground_truth/asian_org.csv \
   --latino_input raw_data/org_data_ground_truth/latino_org.csv \
-  --matches_input outputs/org_matching/org_to_irs_matches.csv \
-  --about_input outputs/org_matching/candidate_about_pages.csv \
-  --candidates_input outputs/org_matching/potential_asian_latino_orgs.csv \
-  --out_dir outputs/ml_validation \
+  --matches_input processed_data/org_matching/org_to_irs_matches.csv \
+  --about_input processed_data/org_matching/candidate_about_pages.csv \
+  --candidates_input processed_data/org_matching/potential_asian_latino_orgs.csv \
+  --out_dir processed_data/ml_validation \
   --folds 5 \
   --confidence_threshold 0.70 \
   --margin_threshold 0.15
@@ -220,24 +226,24 @@ Cross-validated supervised models (`src/train_validate_panethnic_ml.R`):
 - `superlearner`: accuracy `96.94%`, macro-F1 `96.66%`, AUC `0.9973`
 - `glmnet`: accuracy `96.94%`, macro-F1 `96.65%`, AUC `0.9930`
 - Best selected model (current run): `ranger`
-- Source: `outputs/ml_validation/cv_model_metrics.csv`, `outputs/ml_validation/model_selection.csv`
+- Source: `processed_data/ml_validation/cv_model_metrics.csv`, `processed_data/ml_validation/model_selection.csv`
 
 ## Bulk scraping and topic scripts
 
 Additional scripts used for large-scale candidate scraping and content scoring:
 - `src/extract_potential_orgs.R`:
   - builds candidate universe from IRS names + URL table into
-  - `outputs/org_matching/potential_asian_latino_orgs.csv`
+  - `processed_data/org_matching/potential_asian_latino_orgs.csv`
 - `src/scrape_about_pages_bulk.R`:
   - resumable batch scraper for all candidates
-  - writes `outputs/org_matching/candidate_about_pages.csv`
+  - writes `processed_data/org_matching/candidate_about_pages.csv`
 - `src/analyze_about_topics.R`:
   - tags mentions of safety-net programs (SNAP/WIC/Medicaid/senior care/rental assistance/etc.) and democracy/organizing terms
   - writes:
-    - `outputs/topic_analysis/about_topic_summary_overall.csv`
-    - `outputs/topic_analysis/about_topic_summary_by_candidate_type.csv`
-    - `outputs/topic_analysis/about_topic_flagged_orgs.csv`
-    - `outputs/topic_analysis/about_topic_scored_all.csv`
+    - `processed_data/topic_analysis/about_topic_summary_overall.csv`
+    - `processed_data/topic_analysis/about_topic_summary_by_candidate_type.csv`
+    - `processed_data/topic_analysis/about_topic_flagged_orgs.csv`
+    - `processed_data/topic_analysis/about_topic_scored_all.csv`
 
 Note:
 - In the current runtime environment, external DNS/network calls are blocked, so webpage scraping attempts return timeout errors. Topic counts will remain zero until scraping is run in a network-enabled environment.
@@ -259,7 +265,7 @@ Run-all script:
 ```
 
 Resume behavior:
-- The runner writes phase checkpoints to `outputs/pipeline_state/*.done`.
+- The runner writes phase checkpoints to `processed_data/pipeline_state/*.done`.
 - If interrupted, re-running the script skips completed phases and resumes from the next unfinished phase.
 - Bulk webpage scraping is resumable by design and appends progress instead of restarting.
 - To force a clean rerun from scratch:

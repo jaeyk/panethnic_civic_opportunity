@@ -6,7 +6,7 @@ parse_args <- function(args) {
   cfg <- list(
     irs_mbf = "raw_data/irs_data/irs_mbf.csv",
     irs_urls = "raw_data/irs_data/irs_urls.csv",
-    out_file = "outputs/org_matching/potential_asian_latino_orgs.csv"
+    out_file = "processed_data/org_matching/potential_asian_latino_orgs.csv"
   )
   if (length(args) == 0) return(cfg)
   i <- 1L

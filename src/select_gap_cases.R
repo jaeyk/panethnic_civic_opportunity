@@ -6,10 +6,10 @@ suppressPackageStartupMessages({
 
 parse_args <- function(args) {
   cfg <- list(
-    org_enriched = "outputs/org_enriched/org_civic_enriched.csv",
-    population = "outputs/population/population_series.csv",
+    org_enriched = "processed_data/org_enriched/org_civic_enriched.csv",
+    population = "processed_data/population/population_series.csv",
     places_input = "misc/selected_places.csv",
-    out_dir = "outputs/gap_analysis",
+    out_dir = "processed_data/gap_analysis",
     start_year = 1980,
     top_n = 5,
     urban_cutoff = 50000,
@@ -183,7 +183,13 @@ main <- function() {
 
   places_dt <- if (file.exists(cfg$places_input)) fread(cfg$places_input, encoding = "UTF-8") else data.table()
   if (nrow(places_dt) == 0L) {
-    stop("places_input is required for city-level gap selection and cannot be empty.")
+    fwrite(data.table(), file.path(cfg$out_dir, "place_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "selected_gap_cases.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "region_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "urbanicity_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "selected_places_from_gaps.csv"))
+    message("places_input is empty or missing. Wrote empty gap-analysis outputs.")
+    return(invisible(NULL))
   }
 
   if (!"region_focus" %in% names(places_dt)) places_dt[, region_focus := NA_character_]

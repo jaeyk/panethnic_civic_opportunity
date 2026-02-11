@@ -14,8 +14,8 @@ except Exception as e:
 
 def parse_args():
     p = argparse.ArgumentParser(description="Visualize population vs organization growth gaps.")
-    p.add_argument("--org-enriched", default="outputs/org_enriched/org_civic_enriched.csv")
-    p.add_argument("--population", default="outputs/population/population_series.csv")
+    p.add_argument("--org-enriched", default="processed_data/org_enriched/org_civic_enriched.csv")
+    p.add_argument("--population", default="processed_data/population/population_series.csv")
     p.add_argument("--selected-places", default="misc/selected_places.csv")
     p.add_argument("--out-dir", default="outputs/figures")
     return p.parse_args()

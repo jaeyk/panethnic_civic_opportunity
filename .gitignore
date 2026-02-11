@@ -9,5 +9,6 @@
 
 # Data and generated artifacts (keep local, do not commit)
 raw_data/
+processed_data/
 outputs/
 misc/*.pdf

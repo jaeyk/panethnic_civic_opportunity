@@ -6,9 +6,9 @@ suppressPackageStartupMessages({
 
 parse_args <- function(args) {
   cfg <- list(
-    candidates = "outputs/org_matching/similar_org_candidates.csv",
-    about_pages = "outputs/org_matching/candidate_about_pages.csv",
-    out_dir = "outputs/topic_analysis"
+    candidates = "processed_data/org_matching/similar_org_candidates.csv",
+    about_pages = "processed_data/org_matching/candidate_about_pages.csv",
+    out_dir = "processed_data/topic_analysis"
   )
 
   if (length(args) == 0) return(cfg)
@@ -41,14 +41,14 @@ main <- function() {
   dir.create(cfg$out_dir, recursive = TRUE, showWarnings = FALSE)
 
   cand <- fread(cfg$candidates, encoding = "UTF-8")
-  about <- fread(cfg$about_pages, encoding = "UTF-8")
+  about <- if (file.exists(cfg$about_pages)) fread(cfg$about_pages, encoding = "UTF-8") else data.table()
 
+  if (!"ein" %in% names(cand)) stop("candidates file must contain ein")
+  if (!"ein" %in% names(about)) about[, ein := NA_character_]
   cand[, ein := normalize_ein(ein)]
   about[, ein := normalize_ein(ein)]
 
-  if (!"about_page_text" %in% names(about)) {
-    stop("about_pages file must contain about_page_text")
-  }
+  if (!"about_page_text" %in% names(about)) about[, about_page_text := NA_character_]
 
   dt <- merge(
     cand[, .(ein, irs_name_raw, candidate_type, irs_state, irs_city, preferred_link)],

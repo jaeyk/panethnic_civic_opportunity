@@ -5,8 +5,8 @@ source("func/get_about_pages.R")
 
 parse_args <- function(args) {
   cfg <- list(
-    candidates = "outputs/org_matching/potential_asian_latino_orgs.csv",
-    out_file = "outputs/org_matching/candidate_about_pages.csv",
+    candidates = "processed_data/org_matching/potential_asian_latino_orgs.csv",
+    out_file = "processed_data/org_matching/candidate_about_pages.csv",
     start_index = 1L,
     end_index = NA_integer_,
     batch_size = 100L,

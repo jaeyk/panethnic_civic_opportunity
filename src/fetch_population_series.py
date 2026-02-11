@@ -10,7 +10,7 @@ from urllib.request import urlopen
 
 def parse_args():
     p = argparse.ArgumentParser(description="Build Asian/Latino population series from Census APIs using an explicit variable map.")
-    p.add_argument("--output", default="outputs/population/population_series.csv")
+    p.add_argument("--output", default="processed_data/population/population_series.csv")
     p.add_argument("--historical-input", default="raw_data/population_manual_1980_2008.csv")
     p.add_argument("--places-input", default="misc/selected_places.csv")
     p.add_argument("--variable-map", default="misc/census_variable_map.csv")

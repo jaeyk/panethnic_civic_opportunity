@@ -11,7 +11,9 @@ parse_args <- function(args) {
     irs_mbf = "raw_data/irs_data/irs_mbf.csv",
     irs_urls = "raw_data/irs_data/irs_urls.csv",
     irs_url_checks = "raw_data/irs_data/irs_url_checks.csv",
-    out_dir = "outputs/org_matching",
+    out_dir = "processed_data/org_matching",
+    max_org_rows = NA_integer_,
+    max_irs_rows = NA_integer_,
     matching_method = "linkorgs",
     linkorgs_algorithm = "bipartite",
     fallback_to_fuzzy = TRUE,
@@ -38,6 +40,8 @@ parse_args <- function(args) {
       defaults[[key]] <- val
     } else if (key %in% c("match_threshold", "target_match_rate")) {
       defaults[[key]] <- as.numeric(val)
+    } else if (key %in% c("max_org_rows", "max_irs_rows")) {
+      defaults[[key]] <- as.integer(val)
     } else if (key == "fallback_to_fuzzy") {
       defaults[[key]] <- tolower(val) %in% c("1", "true", "t", "yes", "y")
     } else if (key == "scrape_about") {
@@ -105,7 +109,7 @@ prepare_candidates <- function(org_row, irs_dt, fallback_n = 25000L) {
   candidates
 }
 
-load_org_data <- function(org_dir) {
+load_org_data <- function(org_dir, max_org_rows = NA_integer_) {
   asian_path <- file.path(org_dir, "asian_org.csv")
   latino_path <- file.path(org_dir, "latino_org.csv")
 
@@ -130,11 +134,15 @@ load_org_data <- function(org_dir) {
   org[, state_norm := toupper(trimws(States))]
   org[, tok1 := first_token(org_name_norm)]
   org[, tok2 := second_token(org_name_norm)]
+  if (!is.na(max_org_rows) && max_org_rows > 0L && nrow(org) > max_org_rows) {
+    org <- org[1:max_org_rows]
+  }
   org
 }
 
-load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks) {
-  mbf <- fread(irs_mbf, select = c("ein", "name", "state", "city"), encoding = "UTF-8")
+load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks, max_irs_rows = NA_integer_) {
+  nrows_opt <- if (!is.na(max_irs_rows) && max_irs_rows > 0L) max_irs_rows else Inf
+  mbf <- fread(irs_mbf, select = c("ein", "name", "state", "city"), encoding = "UTF-8", nrows = nrows_opt)
   setnames(mbf, c("name", "state", "city"), c("irs_name_raw", "irs_state", "irs_city"))
 
   mbf[, ein := sprintf("%09s", gsub("[^0-9]", "", as.character(ein)))]
@@ -143,10 +151,10 @@ load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks) {
   mbf[, tok1 := first_token(irs_name_norm)]
   mbf[, tok2 := second_token(irs_name_norm)]
 
-  urls <- fread(irs_urls, select = c("ein", "taxpayer_name", "preferred_link", "irs_url", "first_link"), encoding = "UTF-8")
+  urls <- fread(irs_urls, select = c("ein", "taxpayer_name", "preferred_link", "irs_url", "first_link"), encoding = "UTF-8", nrows = nrows_opt)
   urls[, ein := sprintf("%09s", gsub("[^0-9]", "", as.character(ein)))]
 
-  checks <- fread(irs_url_checks, select = c("ein", "url_check", "preferred_link", "irs_url", "first_link"), encoding = "UTF-8")
+  checks <- fread(irs_url_checks, select = c("ein", "url_check", "preferred_link", "irs_url", "first_link"), encoding = "UTF-8", nrows = nrows_opt)
   checks[, ein := sprintf("%09s", gsub("[^0-9]", "", as.character(ein)))]
 
   setkey(mbf, ein)
@@ -166,6 +174,9 @@ load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks) {
                            fifelse(!is.na(first_link) & first_link != "", first_link, i.first_link)))))]
 
   irs[, c("i.preferred_link", "i.irs_url", "i.first_link") := NULL]
+  if (!is.na(max_irs_rows) && max_irs_rows > 0L && nrow(irs) > max_irs_rows) {
+    irs <- irs[1:max_irs_rows]
+  }
   irs
 }
 
@@ -239,6 +250,16 @@ best_match_one_linkorgs <- function(org_row, irs_dt, linkorgs_algorithm = "bipar
   )
 
   pairs <- extract_linkorgs_pairs(link_res, by_x = "org_name_norm", by_y = "irs_name_norm")
+  if (!all(c("org_name_norm", "irs_name_norm") %in% names(pairs)) || nrow(pairs) == 0L) {
+    if (fallback_to_fuzzy) return(best_match_one_fuzzy(org_row, irs_dt, fallback_n = fallback_n))
+    return(data.table(
+      org_id = org_row[["org_id"]],
+      ein = NA_character_,
+      match_score = NA_real_,
+      candidate_n = nrow(candidates),
+      matching_method = "linkorgs"
+    ))
+  }
   pairs <- pairs[org_name_norm == nm]
 
   if (nrow(pairs) == 0L) {
@@ -428,8 +449,8 @@ main <- function() {
   dir.create(args$out_dir, recursive = TRUE, showWarnings = FALSE)
 
   message("Loading org and IRS data...")
-  org <- load_org_data(args$org_dir)
-  irs <- load_irs_data(args$irs_mbf, args$irs_urls, args$irs_url_checks)
+  org <- load_org_data(args$org_dir, max_org_rows = args$max_org_rows)
+  irs <- load_irs_data(args$irs_mbf, args$irs_urls, args$irs_url_checks, max_irs_rows = args$max_irs_rows)
 
   message("Running organization linkage (LinkOrgs-style with blocking)...")
   matched_res <- perform_matching(

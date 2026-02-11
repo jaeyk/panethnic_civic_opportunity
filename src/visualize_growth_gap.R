@@ -7,10 +7,10 @@ suppressPackageStartupMessages({
 
 parse_args <- function(args) {
   cfg <- list(
-    org_enriched = "outputs/org_enriched/org_civic_enriched.csv",
-    population = "outputs/population/population_series.csv",
+    org_enriched = "processed_data/org_enriched/org_civic_enriched.csv",
+    population = "processed_data/population/population_series.csv",
     selected_places = "misc/selected_places.csv",
-    gap_scores = "outputs/gap_analysis/place_gap_scores.csv",
+    gap_scores = "processed_data/gap_analysis/place_gap_scores.csv",
     out_dir = "outputs/figures"
   )
 

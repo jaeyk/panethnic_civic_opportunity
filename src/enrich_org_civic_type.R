@@ -6,13 +6,13 @@ suppressPackageStartupMessages({
 
 parse_args <- function(args) {
   cfg <- list(
-    matches = "outputs/org_matching/org_to_irs_matches.csv",
-    candidates = "outputs/org_matching/similar_org_candidates.csv",
-    about_pages = "outputs/org_matching/candidate_about_pages.csv",
+    matches = "processed_data/org_matching/org_to_irs_matches.csv",
+    candidates = "processed_data/org_matching/similar_org_candidates.csv",
+    about_pages = "processed_data/org_matching/candidate_about_pages.csv",
     irs_org_activities = "raw_data/irs_data/irs_org_activities.csv",
     irs_nonweb_activities = "raw_data/irs_data/irs_nonweb_activities.csv",
     predictions = "raw_data/web_data/predictions.csv",
-    out_dir = "outputs/org_enriched",
+    out_dir = "processed_data/org_enriched",
     include_uncertain = FALSE
   )
 
@@ -122,6 +122,7 @@ load_candidate_matches <- function(candidates_path, about_path, include_uncertai
       cand <- merge(cand, unique(about[, .(ein, about_page_text)]), by = "ein", all.x = TRUE)
     }
   }
+  if (!"about_page_text" %in% names(cand)) cand[, about_page_text := NA_character_]
 
   cand[, inferred_group := infer_panethnic_group(irs_name_raw, about_page_text)]
   cand[, origin := "expanded_candidate"]
