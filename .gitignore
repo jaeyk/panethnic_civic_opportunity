@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+
+# Data and generated artifacts (keep local, do not commit)
+raw_data/
+outputs/
+misc/*.pdf
