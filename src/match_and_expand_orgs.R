@@ -14,6 +14,7 @@ parse_args <- function(args) {
     out_dir = "processed_data/org_matching",
     max_org_rows = NA_integer_,
     max_irs_rows = NA_integer_,
+    progress_every = 25L,
     matching_method = "linkorgs",
     linkorgs_algorithm = "bipartite",
     fallback_to_fuzzy = TRUE,
@@ -40,7 +41,7 @@ parse_args <- function(args) {
       defaults[[key]] <- val
     } else if (key %in% c("match_threshold", "target_match_rate")) {
       defaults[[key]] <- as.numeric(val)
-    } else if (key %in% c("max_org_rows", "max_irs_rows")) {
+    } else if (key %in% c("max_org_rows", "max_irs_rows", "progress_every")) {
       defaults[[key]] <- as.integer(val)
     } else if (key == "fallback_to_fuzzy") {
       defaults[[key]] <- tolower(val) %in% c("1", "true", "t", "yes", "y")
@@ -305,8 +306,31 @@ best_match_one_linkorgs <- function(org_row, irs_dt, linkorgs_algorithm = "bipar
 }
 
 perform_matching <- function(org_dt, irs_dt, matching_method, linkorgs_algorithm, fallback_to_fuzzy, match_threshold, target_match_rate) {
-  out <- rbindlist(lapply(seq_len(nrow(org_dt)), function(i) {
-    if (tolower(matching_method) == "linkorgs") {
+  n <- nrow(org_dt)
+  if (n == 0L) {
+    return(list(
+      matched = data.table(),
+      summary = data.table(
+        org_n = 0L,
+        matched_n = 0L,
+        unmatched_n = 0L,
+        match_rate = NA_real_,
+        matching_method = matching_method,
+        linkorgs_algorithm = linkorgs_algorithm,
+        match_threshold = match_threshold,
+        target_match_rate = target_match_rate,
+        target_met = FALSE
+      )
+    ))
+  }
+
+  pb <- txtProgressBar(min = 0, max = n, style = 3)
+  out_list <- vector("list", n)
+  progress_every <- getOption("match.progress.every", 25L)
+  t0 <- Sys.time()
+
+  for (i in seq_len(n)) {
+    out_list[[i]] <- if (tolower(matching_method) == "linkorgs") {
       best_match_one_linkorgs(
         org_row = org_dt[i],
         irs_dt = irs_dt,
@@ -316,7 +340,19 @@ perform_matching <- function(org_dt, irs_dt, matching_method, linkorgs_algorithm
     } else {
       best_match_one_fuzzy(org_row = org_dt[i], irs_dt = irs_dt)
     }
-  }), use.names = TRUE, fill = TRUE)
+
+    setTxtProgressBar(pb, i)
+    if (i %% progress_every == 0L || i == n) {
+      elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+      rate <- i / pmax(elapsed, 1e-6)
+      eta <- (n - i) / pmax(rate, 1e-6)
+      message(sprintf("  Matched %s/%s orgs (%.1f%%). Elapsed: %.1fs | ETA: %.1fs",
+                      i, n, 100 * i / n, elapsed, eta))
+    }
+  }
+  close(pb)
+
+  out <- rbindlist(out_list, use.names = TRUE, fill = TRUE)
 
   matched <- merge(org_dt, out, by = "org_id", all.x = TRUE)
   matched <- merge(matched, irs_dt[, .(ein, irs_name_raw, irs_name_norm, irs_state, irs_city, preferred_link, url_check)], by = "ein", all.x = TRUE)
@@ -447,10 +483,15 @@ scrape_about_pages <- function(candidate_dt, matched_dt, out_dir, scrape_scope, 
 main <- function() {
   args <- parse_args(commandArgs(trailingOnly = TRUE))
   dir.create(args$out_dir, recursive = TRUE, showWarnings = FALSE)
+  options(match.progress.every = args$progress_every)
 
   message("Loading org and IRS data...")
+  t_load <- Sys.time()
   org <- load_org_data(args$org_dir, max_org_rows = args$max_org_rows)
+  message(sprintf("  Loaded org ground truth rows: %s", format(nrow(org), big.mark = ",")))
   irs <- load_irs_data(args$irs_mbf, args$irs_urls, args$irs_url_checks, max_irs_rows = args$max_irs_rows)
+  message(sprintf("  Loaded IRS rows (post-join): %s", format(nrow(irs), big.mark = ",")))
+  message(sprintf("  Data loading completed in %.1fs", as.numeric(difftime(Sys.time(), t_load, units = "secs"))))
 
   message("Running organization linkage (LinkOrgs-style with blocking)...")
   matched_res <- perform_matching(
