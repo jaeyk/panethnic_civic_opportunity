@@ -33,7 +33,7 @@ Use `src/match_and_expand_orgs.R` to:
 - probabilistically link org ground truth (`raw_data/org_data_ground_truth/asian_org.csv` and `raw_data/org_data_ground_truth/latino_org.csv`) to IRS records by name (LinkOrgs-style approach with blocking + bipartite matching),
 - report match rate against a target (default: 90%),
 - generate additional IRS candidates with similar naming patterns (direct panethnic, ethnic-named, unique/neighbors),
-- optionally scrape about-page text for ethnic/unique candidates using `func/get_about_pages.R`.
+- scrape about-page text for ethnic/unique candidates using `func/get_about_pages.R`.
 
 Example (no scraping):
 
@@ -57,7 +57,7 @@ Outputs:
 - `processed_data/org_matching/org_to_irs_matches.csv`
 - `processed_data/org_matching/org_to_irs_unmatched.csv`
 - `processed_data/org_matching/similar_org_candidates.csv`
-- `processed_data/org_matching/candidate_about_pages.csv` (only when `--scrape_about true`)
+- `processed_data/org_matching/candidate_about_pages.csv`
 
 ## Project plan (current stage)
 
@@ -237,11 +237,17 @@ Additional scripts used for large-scale candidate scraping and content scoring:
 - `src/scrape_about_pages_bulk.R`:
   - resumable batch scraper for all candidates
   - writes `processed_data/org_matching/candidate_about_pages.csv`
+- `src/scrape_about_pages_browser.py`:
+  - browser-rendered scraper (Playwright) that finds likely About/Who-We-Are pages via menu links
+  - extracts mission/history/program-relevant text with resume support and progress logging
+  - useful when static scraping returns mostly nav boilerplate or JS-heavy pages
 - `src/analyze_about_topics.R`:
-  - tags mentions of safety-net programs (SNAP/WIC/Medicaid/senior care/rental assistance/etc.) and democracy/organizing terms
+  - tags mentions of safety-net programs and democracy/organizing terms
+  - uses `misc/safety_net_dictionary.csv` with state-specific aliases (e.g., `CalFresh` for CA SNAP)
   - writes:
     - `processed_data/topic_analysis/about_topic_summary_overall.csv`
     - `processed_data/topic_analysis/about_topic_summary_by_candidate_type.csv`
+    - `processed_data/topic_analysis/about_topic_safety_program_counts.csv`
     - `processed_data/topic_analysis/about_topic_flagged_orgs.csv`
     - `processed_data/topic_analysis/about_topic_scored_all.csv`
 
@@ -250,13 +256,13 @@ Note:
 
 ## Pipeline execution order (01-07)
 
-1. `01`-`03`: `src/match_and_expand_orgs.R` (matching, expansion, optional about-page scraping)
-2. `04`: `src/enrich_org_civic_type.R`
-3. `05a`: `src/fetch_population_series.py`
-4. `05b`: `src/select_gap_cases.R`
-5. `06`: `src/visualize_growth_gap.R`
-6. `07`: `src/train_validate_panethnic_ml.R`
-7. shutdown: `run_pipeline_01_06_and_shutdown.sh` triggers machine shutdown after successful completion
+1. `01`: matching/expansion (`src/match_and_expand_orgs.R`)
+2. `01b`: resumable bulk scraping (`src/scrape_about_pages_bulk.R`)
+3. `01c`: about-page topic scoring (`src/analyze_about_topics.R`)
+4. `01d`: supervised ML validation/filtering (`src/train_validate_panethnic_ml.R`)
+5. `02`: enrichment (`src/enrich_org_civic_type.R`) using ML-pass candidates when available
+6. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
+7. `05` + `06`: visualization + completion/shutdown behavior in runner
 
 Run-all script:
 
@@ -268,6 +274,7 @@ Resume behavior:
 - The runner writes phase checkpoints to `processed_data/pipeline_state/*.done`.
 - If interrupted, re-running the script skips completed phases and resumes from the next unfinished phase.
 - Bulk webpage scraping is resumable by design and appends progress instead of restarting.
+- By default, `SCRAPE_ABOUT=true` in both runner scripts because about-page attributes are required for safety-net/democracy tagging.
 - To force a clean rerun from scratch:
 
 ```bash

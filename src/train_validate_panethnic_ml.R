@@ -200,6 +200,19 @@ choose_sl_library <- function() {
 main <- function() {
   cfg <- parse_args(commandArgs(trailingOnly = TRUE))
   dir.create(cfg$out_dir, recursive = TRUE, showWarnings = FALSE)
+  total_steps <- as.integer(cfg$folds + 9L)
+  pb <- txtProgressBar(min = 0, max = total_steps, style = 3)
+  step <- 0L
+  t0 <- Sys.time()
+  tick <- function(label) {
+    step <<- step + 1L
+    setTxtProgressBar(pb, step)
+    elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    rate <- step / pmax(elapsed, 1e-6)
+    eta <- (total_steps - step) / pmax(rate, 1e-6)
+    message(sprintf("  %s | step %s/%s | elapsed %.1fs | ETA %.1fs", label, step, total_steps, elapsed, eta))
+  }
+  message("Phase 01d (SuperLearner): loading data...")
 
   asian <- fread(cfg$asian_input, encoding = "UTF-8")
   latino <- fread(cfg$latino_input, encoding = "UTF-8")
@@ -228,6 +241,7 @@ main <- function() {
     }
   }
   if (!"about_page_text" %in% names(gt)) gt[, about_page_text := NA_character_]
+  tick("Ground-truth + about-page join complete")
 
   gt[, text := clean_text(paste(org_name, about_page_text))]
   gt[nchar(text) == 0, text := clean_text(org_name)]
@@ -238,6 +252,7 @@ main <- function() {
   vocab <- build_vocab(gt$text, min_df = cfg$min_df, max_features = cfg$max_features)
   dtm_train <- build_dtm(gt$text, vocab)
   X <- dtm_train$X
+  tick("Text features built")
 
   models <- c("glmnet", "ranger", "xgboost")
   oof <- data.table(row_id = seq_len(nrow(gt)), y = y, fold = folds)
@@ -259,6 +274,7 @@ main <- function() {
     oof[te, p_glmnet := p_glm]
     oof[te, p_ranger := p_rf]
     oof[te, p_xgboost := p_xgb]
+    tick(sprintf("Cross-validation fold %s/%s complete", f, cfg$folds))
   }
 
   # Stacked super learner (meta logistic over OOF preds)
@@ -287,6 +303,7 @@ main <- function() {
     # Robust fallback: average base learners.
     oof[, p_superlearner := rowMeans(.SD, na.rm = TRUE), .SDcols = c("p_glmnet", "p_ranger", "p_xgboost")]
   }
+  tick("SuperLearner CV complete")
 
   for (m in c(models, "superlearner")) {
     pm <- paste0("p_", m)
@@ -302,8 +319,11 @@ main <- function() {
 
   # Train full models.
   p_full_glm <- tryCatch(fit_predict_glmnet(X, y, X), error = function(e) rep(mean(y), nrow(X)))
+  tick("Full glmnet fit complete")
   p_full_rf <- tryCatch(fit_predict_ranger(X, y, X), error = function(e) rep(mean(y), nrow(X)))
+  tick("Full ranger fit complete")
   p_full_xgb <- tryCatch(fit_predict_xgb(X, y, X), error = function(e) rep(mean(y), nrow(X)))
+  tick("Full xgboost fit complete")
   sl_full <- tryCatch({
     SuperLearner::SuperLearner(
       Y = y,
@@ -314,6 +334,7 @@ main <- function() {
       verbose = FALSE
     )
   }, error = function(e) NULL)
+  tick("Full SuperLearner fit complete")
 
   # Candidate scoring.
   cand <- fread(cfg$candidates_input, encoding = "UTF-8")
@@ -329,9 +350,11 @@ main <- function() {
   cand <- merge(cand, about[, .(ein, about_page_text)], by = "ein", all.x = TRUE)
   cand[, text := clean_text(paste(irs_name_raw, about_page_text))]
   cand[nchar(text) == 0, text := clean_text(irs_name_raw)]
+  tick("Candidate + about-page join complete")
 
   dtm_cand <- build_dtm(cand$text, vocab, idf = dtm_train$idf)
   Xc <- dtm_cand$X
+  tick("Candidate text features built")
 
   pc_glm <- tryCatch(fit_predict_glmnet(X, y, Xc), error = function(e) rep(mean(y), nrow(Xc)))
   pc_rf <- tryCatch(fit_predict_ranger(X, y, Xc), error = function(e) rep(mean(y), nrow(Xc)))
@@ -372,6 +395,8 @@ main <- function() {
     theme_minimal(base_size = 12) +
     labs(title = "Cross-Validated Model Performance", x = "Model", y = "Score")
   ggsave(file.path(cfg$out_dir, "cv_model_performance.png"), p, width = 10, height = 4.5, dpi = 220)
+  tick("Outputs and performance figure saved")
+  close(pb)
 
   message(sprintf("Done. Best model: %s | Passed ML filter: %s/%s", best_model, format(sum(cand$pass_ml_filter), big.mark = ","), format(nrow(cand), big.mark = ",")))
 }

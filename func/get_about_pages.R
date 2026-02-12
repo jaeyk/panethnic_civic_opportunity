@@ -40,21 +40,28 @@ if_not_about <- function(href) {
 url_exists <- function(url,
                        non_2xx_return_value = FALSE,
                        quiet = TRUE,
-                       timeout_thres = 10) {
+                       timeout_thres = 30) {
+  normalize_base_url <- function(x) {
+    x <- trimws(as.character(x))
+    x <- sub("#.*$", "", x)
+    x <- sub("\\?.*$", "", x)
+    if (!grepl("^https?://", x, ignore.case = TRUE)) x <- paste0("https://", x)
+    x
+  }
+  url <- normalize_base_url(url)
+
   sHEAD <- purrr::safely(httr::HEAD)
   sGET <- purrr::safely(httr::GET)
   
   # Try HEAD first since it's lightweight
-  res <- sHEAD(url, config(
+  res <- sHEAD(url, httr::timeout(timeout_thres), config(
     ssl_verifypeer = FALSE,
-    timeout = timeout_thres,
     followlocation = TRUE
   ))
   
   if (is.null(res$result) || ((status_code(res$result) %/% 200) != 1)) {
-    res <- sGET(url, config(
+    res <- sGET(url, httr::timeout(timeout_thres), config(
       ssl_verifypeer = FALSE,
-      timeout = timeout_thres,
       followlocation = TRUE
     ))
     
@@ -62,7 +69,7 @@ url_exists <- function(url,
       return(FALSE)
     } # or whatever you want to return on "hard" errors
     if (((status_code(res$result) %/% 200) != 1)) {
-      if (!quiet) warning(sprintf("Requests for [%s] responded but without an HTTP status code in the 200-299 range", x))
+      if (!quiet) warning(sprintf("Requests for [%s] responded but without an HTTP status code in the 200-299 range", url))
       return(non_2xx_return_value)
     }
     return(TRUE)
@@ -106,14 +113,22 @@ url_exists <- function(url,
 #' @export
 #'
 
-extract_about_links <- function(base_url, timeout_thres = 10) {
+extract_about_links <- function(base_url, timeout_thres = 30) {
+  normalize_base_url <- function(x) {
+    x <- trimws(as.character(x))
+    x <- sub("#.*$", "", x)
+    x <- sub("\\?.*$", "", x)
+    if (!grepl("^https?://", x, ignore.case = TRUE)) x <- paste0("https://", x)
+    x
+  }
+  base_url <- normalize_base_url(base_url)
   
   # Timeout to prevent hanging on unreachable/very slow websites
   if (url_exists(base_url, timeout_thres = timeout_thres) == FALSE) {
     stop(glue::glue("This URL is not responding ({timeout_thres} seconds timeout)."))
   }
   
-  response <- GET(base_url, config(ssl_verifypeer = FALSE, timeout = 10, followlocation = TRUE))
+  response <- GET(base_url, httr::timeout(timeout_thres), config(ssl_verifypeer = FALSE, followlocation = TRUE))
   
   # no-encoding issues from the server
   possible_read <- purrr::possibly(xml2::read_html, otherwise = "This URL is broken.")
@@ -275,8 +290,16 @@ extract_about_links <- function(base_url, timeout_thres = 10) {
 #' @importFrom xml2 url_absolute
 #' @export
 
-find_about_link <- function(base_url) {
-  about_links <- extract_about_links(base_url)
+find_about_link <- function(base_url, timeout_thres = 30) {
+  normalize_base_url <- function(x) {
+    x <- trimws(as.character(x))
+    x <- sub("#.*$", "", x)
+    x <- sub("\\?.*$", "", x)
+    if (!grepl("^https?://", x, ignore.case = TRUE)) x <- paste0("https://", x)
+    x
+  }
+  base_url <- normalize_base_url(base_url)
+  about_links <- extract_about_links(base_url, timeout_thres = timeout_thres)
   
   # Find cases where links are broken or links don't have about pages
   if (NA %in% about_links$href == TRUE) {
@@ -313,6 +336,17 @@ find_about_link <- function(base_url) {
 #' @export
 
 extract_about_page_content <- function(about_url) {
+  text_score <- function(x) {
+    x <- tolower(trimws(as.character(x)))
+    if (is.na(x) || x == "") return(-Inf)
+    n_words <- length(unlist(strsplit(x, "\\s+")))
+    menu_terms <- c(
+      "menu", "main content", "skip to main content", "contact", "search", "donate",
+      "newsroom", "events", "board of directors", "staff", "programs", "annual report"
+    )
+    menu_hits <- sum(vapply(menu_terms, function(tk) grepl(tk, x, fixed = TRUE), logical(1)))
+    n_words - 60 * menu_hits
+  }
   
   # Broken, flat, PHP error, about page issues
   if (str_detect(about_url, "tree search|is broken|is flat|PHP error|about page") == TRUE) {
@@ -323,8 +357,37 @@ extract_about_page_content <- function(about_url) {
   
   # Other cases
   else {
-    about_page <- gettxt(about_url) %>%
-      strip(digit.remove = FALSE) # more comprehensive and efficient text cleaning
+    safe_utf8 <- function(x) {
+      x <- as.character(x)
+      x[is.na(x)] <- ""
+      x <- vapply(x, function(s) {
+        out <- tryCatch(iconv(s, from = "", to = "UTF-8", sub = ""), error = function(e) NA_character_)
+        if (is.na(out)) out <- tryCatch(enc2utf8(s), error = function(e) "")
+        out <- gsub("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", " ", out, perl = TRUE)
+        out
+      }, character(1))
+      x
+    }
+
+    raw_txt <- tryCatch(gettxt(about_url), error = function(e) paste("SCRAPE_ERROR:", conditionMessage(e)))
+    alt_txt <- tryCatch(parse_by_length(about_url, sentence_threshold = 3, timeout_thres = 30), error = function(e) NA_character_)
+
+    candidates <- character(0)
+    if (!(length(raw_txt) == 1L && grepl("^SCRAPE_ERROR:", raw_txt))) {
+      raw_txt <- safe_utf8(raw_txt)
+      stripped <- tryCatch(strip(raw_txt, digit.remove = FALSE), error = function(e) raw_txt)
+      candidates <- c(candidates, safe_utf8(stripped))
+    }
+    if (!is.na(alt_txt) && nzchar(alt_txt)) {
+      candidates <- c(candidates, safe_utf8(alt_txt))
+    }
+
+    if (length(candidates) == 0L) {
+      about_page <- raw_txt
+    } else {
+      scores <- vapply(candidates, text_score, numeric(1))
+      about_page <- candidates[[which.max(scores)]]
+    }
     
     # Output: dataframe
     about_url_text <- about_page
@@ -340,10 +403,18 @@ extract_about_page_content <- function(about_url) {
 #' @return about_page A dataframe that contains about page text
 #' @export
 
-get_about_page_content <- function(base_url) {
+get_about_page_content <- function(base_url, timeout_thres = 30) {
+  normalize_base_url <- function(x) {
+    x <- trimws(as.character(x))
+    x <- sub("#.*$", "", x)
+    x <- sub("\\?.*$", "", x)
+    if (!grepl("^https?://", x, ignore.case = TRUE)) x <- paste0("https://", x)
+    x
+  }
+  base_url <- normalize_base_url(base_url)
   
   # Search prospective about URLs
-  about_url <- find_about_link(base_url)
+  about_url <- find_about_link(base_url, timeout_thres = timeout_thres)
   
   # Extract information
   about_url_text <- extract_about_page_content(about_url)
@@ -411,8 +482,8 @@ get_all_texts <- function(org_url) {
 #' @importFrom XML xpathApply
 #' @importFrom graphics text
 #' @export
-parse_by_length <- function(url, sentence_threshold = 5) {
-  response <- GET(url, config(ssl_verifypeer = FALSE, timeout = 10, followlocation = TRUE))
+parse_by_length <- function(url, sentence_threshold = 5, timeout_thres = 30) {
+  response <- GET(url, httr::timeout(timeout_thres), config(ssl_verifypeer = FALSE, followlocation = TRUE))
   possible_read <- possibly(read_html, otherwise = NA)
   pg <- possible_read(response)
   

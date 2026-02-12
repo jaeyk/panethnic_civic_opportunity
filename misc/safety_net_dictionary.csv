@@ -1,0 +1,41 @@
+program_group,term,state,notes
+SNAP,snap,,federal name
+SNAP,supplemental nutrition assistance program,,federal long name
+SNAP,food stamps,,legacy/common reference
+SNAP,calfresh,CA,California SNAP brand
+SNAP,lone star card,TX,Texas EBT/SNAP reference
+SNAP,link card,IL,Illinois SNAP/EBT reference
+SNAP,ebt,,generic card reference
+WIC,wic,,federal acronym
+WIC,women infants and children,,federal long name
+WIC,special supplemental nutrition program for women infants and children,,formal name
+Medicaid,medicaid,,federal name
+Medicaid,medi-cal,CA,California Medicaid
+Medicaid,apple health,WA,Washington Medicaid
+Medicaid,badgercare,WI,Wisconsin Medicaid
+Medicaid,soonercare,OK,Oklahoma Medicaid
+Medicaid,masshealth,MA,Massachusetts Medicaid
+Medicaid,tenncare,TN,Tennessee Medicaid
+Medicaid,ahcccs,AZ,Arizona Medicaid
+Medicaid,husky health,CT,Connecticut Medicaid
+CHIP,chip,,Children's Health Insurance Program
+CHIP,children s health insurance program,,formal name
+CHIP,all kids,IL,Illinois CHIP-related branding
+Cash Assistance,tanf,,federal acronym
+Cash Assistance,temporary assistance for needy families,,federal long name
+Cash Assistance,cash assistance,,generic program wording
+Housing Assistance,rental assistance,,generic program wording
+Housing Assistance,housing voucher,,generic voucher wording
+Housing Assistance,section 8,,federal voucher wording
+Housing Assistance,public housing,,federal/local housing aid
+Housing Assistance,housing choice voucher,,HUD voucher wording
+Senior Care,senior care,,generic wording
+Senior Care,elder care,,generic wording
+Senior Care,in-home care,,generic wording
+Senior Care,caregiver support,,generic wording
+Senior Care,long term care,,generic wording
+Utility Assistance,liheap,,Low Income Home Energy Assistance Program
+Utility Assistance,low income home energy assistance program,,formal name
+Utility Assistance,utility assistance,,generic wording
+Nutrition Assistance,food pantry,,related safety-net service
+Nutrition Assistance,meal assistance,,related safety-net service

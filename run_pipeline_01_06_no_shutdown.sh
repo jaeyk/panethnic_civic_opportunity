@@ -27,13 +27,20 @@ PLACES_INPUT="${PLACES_INPUT:-misc/selected_places.csv}"
 HIST_POP_INPUT="${HIST_POP_INPUT:-raw_data/population_manual_1980_2008.csv}"
 TOP_N="${TOP_N:-5}"
 START_YEAR="${START_YEAR:-1980}"
-SCRAPE_ABOUT="${SCRAPE_ABOUT:-false}"
 SCRAPE_LIMIT="${SCRAPE_LIMIT:-500}"
 CENSUS_API_KEY="${CENSUS_API_KEY:-}"
 SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 SHUTDOWN_ON_COMPLETE="${SHUTDOWN_ON_COMPLETE:-false}"
+TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
+SAFETY_DICT="${SAFETY_DICT:-misc/safety_net_dictionary.csv}"
+ML_OUT="${ML_OUT:-processed_data/ml_validation}"
+ASIAN_GT="${ASIAN_GT:-raw_data/org_data_ground_truth/asian_org.csv}"
+LATINO_GT="${LATINO_GT:-raw_data/org_data_ground_truth/latino_org.csv}"
 
-mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT"
+# About-page scraping is required for downstream issue attributes.
+SCRAPE_ABOUT="${SCRAPE_ABOUT:-true}"
+
+mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT" "$TOPIC_OUT" "$ML_OUT"
 
 phase_done() {
   local phase_id="$1"
@@ -93,6 +100,44 @@ if [[ "$SCRAPE_ABOUT" == "true" ]]; then
 
     mark_done "01b"
   fi
+else
+  echo "WARNING: SCRAPE_ABOUT=false, skipping required about-page attributes (safety-net/democracy)."
+fi
+
+echo "[01c/06] Phase 01c: topic tagging from about pages (safety-net + democracy)"
+if phase_done "01c"; then
+  echo "  - already completed; skipping"
+else
+  if [[ ! -f "$ABOUT_PAGES_INPUT" ]]; then
+    echo "ERROR: missing $ABOUT_PAGES_INPUT. Run with SCRAPE_ABOUT=true."
+    exit 1
+  fi
+  Rscript src/analyze_about_topics.R \
+    --candidates "$MATCH_OUT/similar_org_candidates.csv" \
+    --about_pages "$ABOUT_PAGES_INPUT" \
+    --safety_dict "$SAFETY_DICT" \
+    --out_dir "$TOPIC_OUT"
+  mark_done "01c"
+fi
+
+echo "[01d/06] Phase 01d: supervised ML validation/filtering (SuperLearner)"
+if phase_done "01d"; then
+  echo "  - already completed; skipping"
+else
+  Rscript src/train_validate_panethnic_ml.R \
+    --asian_input "$ASIAN_GT" \
+    --latino_input "$LATINO_GT" \
+    --matches_input "$MATCH_OUT/org_to_irs_matches.csv" \
+    --about_input "$ABOUT_PAGES_INPUT" \
+    --candidates_input "$MATCH_OUT/similar_org_candidates.csv" \
+    --out_dir "$ML_OUT"
+  mark_done "01d"
+fi
+
+CANDIDATES_FOR_ENRICH="$MATCH_OUT/similar_org_candidates.csv"
+if [[ -f "$ML_OUT/candidate_predictions_pass_ml_filter.csv" ]]; then
+  CANDIDATES_FOR_ENRICH="$ML_OUT/candidate_predictions_pass_ml_filter.csv"
+  echo "Using ML-pass candidates for enrichment: $CANDIDATES_FOR_ENRICH"
 fi
 
 echo "[02/06] Phase 04: civic opportunity + organization type enrichment"
@@ -101,7 +146,7 @@ if phase_done "02"; then
 else
   Rscript src/enrich_org_civic_type.R \
     --matches "$MATCH_OUT/org_to_irs_matches.csv" \
-    --candidates "$MATCH_OUT/similar_org_candidates.csv" \
+    --candidates "$CANDIDATES_FOR_ENRICH" \
     --about_pages "$ABOUT_PAGES_INPUT" \
     --irs_org_activities raw_data/irs_data/irs_org_activities.csv \
     --irs_nonweb_activities raw_data/irs_data/irs_nonweb_activities.csv \
