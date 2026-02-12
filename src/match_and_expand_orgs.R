@@ -86,6 +86,72 @@ compute_similarity <- function(a, b) {
   pmax(jw, lv)
 }
 
+flag_pattern_in_chunks <- function(x, pattern, chunk_size = 50000L, label = "scan") {
+  n <- length(x)
+  if (n == 0L) return(logical(0))
+  out <- rep(FALSE, n)
+  starts <- seq.int(1L, n, by = chunk_size)
+  pb <- txtProgressBar(min = 0, max = n, style = 3)
+  t0 <- Sys.time()
+  done <- 0L
+
+  for (s in starts) {
+    e <- min(s + chunk_size - 1L, n)
+    out[s:e] <- grepl(pattern, x[s:e], ignore.case = TRUE)
+    done <- e
+    setTxtProgressBar(pb, done)
+    elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    rate <- done / pmax(elapsed, 1e-6)
+    eta <- (n - done) / pmax(rate, 1e-6)
+    message(sprintf("  %s: %s/%s (%.1f%%) | elapsed %.1fs | ETA %.1fs",
+                    label, done, n, 100 * done / n, elapsed, eta))
+  }
+
+  close(pb)
+  out
+}
+
+flag_seed_tokens_batched <- function(x, tokens, row_chunk_size = 50000L, token_batch_size = 60L, label = "seed_token_scan") {
+  n <- length(x)
+  if (n == 0L || length(tokens) == 0L) return(logical(n))
+
+  token_batches <- split(tokens, ceiling(seq_along(tokens) / token_batch_size))
+  row_starts <- seq.int(1L, n, by = row_chunk_size)
+  total_steps <- length(token_batches) * length(row_starts)
+  step <- 0L
+  out <- rep(FALSE, n)
+  t0 <- Sys.time()
+  pb <- txtProgressBar(min = 0, max = total_steps, style = 3)
+
+  for (b in seq_along(token_batches)) {
+    batch_tokens <- token_batches[[b]]
+    token_pattern <- paste(sprintf("\\b%s\\b", gsub("([.|(){}+*?^$\\[\\]\\\\])", "\\\\\\1", batch_tokens)), collapse = "|")
+
+    for (s in row_starts) {
+      e <- min(s + row_chunk_size - 1L, n)
+      idx <- s:e
+      remaining <- idx[!out[idx]]
+
+      if (length(remaining) > 0L) {
+        out[remaining] <- grepl(token_pattern, x[remaining], ignore.case = TRUE)
+      }
+
+      step <- step + 1L
+      setTxtProgressBar(pb, step)
+      elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+      rate <- step / pmax(elapsed, 1e-6)
+      eta <- (total_steps - step) / pmax(rate, 1e-6)
+      message(sprintf(
+        "  %s: token_batch %s/%s | rows %s-%s/%s | step %s/%s | elapsed %.1fs | ETA %.1fs",
+        label, b, length(token_batches), s, e, n, step, total_steps, elapsed, eta
+      ))
+    }
+  }
+
+  close(pb)
+  out
+}
+
 prepare_candidates <- function(org_row, irs_dt, fallback_n = 25000L) {
   st <- org_row[["state_norm"]]
   t1 <- org_row[["tok1"]]
@@ -378,8 +444,11 @@ perform_matching <- function(org_dt, irs_dt, matching_method, linkorgs_algorithm
 }
 
 find_similar_org_candidates <- function(irs_dt, matched_dt) {
+  t0 <- Sys.time()
   seed_eins <- unique(matched_dt[is_match == TRUE & !is.na(ein), ein])
+  message(sprintf("  Seed EINs excluded from candidate pool: %s", format(length(seed_eins), big.mark = ",")))
   pool <- irs_dt[!ein %in% seed_eins]
+  message(sprintf("  Candidate pool size after exclusion: %s", format(nrow(pool), big.mark = ",")))
 
   if (nrow(pool) == 0L) {
     return(data.table())
@@ -403,14 +472,21 @@ find_similar_org_candidates <- function(irs_dt, matched_dt) {
   direct_pattern <- paste(sprintf("\\b%s\\b", gsub(" +", "\\\\s+", direct_terms)), collapse = "|")
   ethnic_pattern <- paste(sprintf("\\b%s\\b", gsub(" +", "\\\\s+", ethnic_terms)), collapse = "|")
 
-  pool[, direct_flag := grepl(direct_pattern, name_norm, ignore.case = TRUE)]
-  pool[, ethnic_flag := grepl(ethnic_pattern, name_norm, ignore.case = TRUE)]
+  message("  Scanning direct panethnic terms...")
+  pool[, direct_flag := flag_pattern_in_chunks(name_norm, direct_pattern, label = "direct_term_scan")]
+  message(sprintf("  Direct panethnic flagged: %s", format(sum(pool$direct_flag), big.mark = ",")))
+
+  message("  Scanning ethnic terms...")
+  pool[, ethnic_flag := flag_pattern_in_chunks(name_norm, ethnic_pattern, label = "ethnic_term_scan")]
+  message(sprintf("  Ethnic-name flagged: %s", format(sum(pool$ethnic_flag), big.mark = ",")))
 
   if (length(seed_tokens) > 0) {
-    token_pattern <- paste(sprintf("\\b%s\\b", gsub("([.|(){}+*?^$\\[\\]\\\\])", "\\\\\\1", seed_tokens)), collapse = "|")
-    pool[, seed_token_flag := grepl(token_pattern, name_norm, ignore.case = TRUE)]
+    message(sprintf("  Scanning seed-token neighbors (%s tokens, batched)...", length(seed_tokens)))
+    pool[, seed_token_flag := flag_seed_tokens_batched(name_norm, seed_tokens, label = "seed_token_scan")]
+    message(sprintf("  Seed-token neighbors flagged: %s", format(sum(pool$seed_token_flag), big.mark = ",")))
   } else {
     pool[, seed_token_flag := FALSE]
+    message("  No seed tokens available; skipping neighbor scan.")
   }
 
   pool[, candidate_type := fifelse(direct_flag, "direct_panethnic",
@@ -421,6 +497,9 @@ find_similar_org_candidates <- function(irs_dt, matched_dt) {
     candidate_type, direct_flag, ethnic_flag, seed_token_flag
   )]
 
+  message(sprintf("  Total similar-organization candidates identified: %s (in %.1fs)",
+                  format(nrow(candidates), big.mark = ","),
+                  as.numeric(difftime(Sys.time(), t0, units = "secs"))))
   unique(candidates)
 }
 
