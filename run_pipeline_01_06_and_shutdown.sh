@@ -28,6 +28,7 @@ HIST_POP_INPUT="${HIST_POP_INPUT:-raw_data/population_manual_1980_2008.csv}"
 TOP_N="${TOP_N:-5}"
 START_YEAR="${START_YEAR:-1980}"
 SCRAPE_LIMIT="${SCRAPE_LIMIT:-500}"
+SCRAPER_TIMEOUT_SEC="${SCRAPER_TIMEOUT_SEC:-500}"
 CENSUS_API_KEY="${CENSUS_API_KEY:-}"
 SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
@@ -49,6 +50,37 @@ phase_done() {
 mark_done() {
   local phase_id="$1"
   touch "$STATE_DIR/${phase_id}.done"
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_sec" "$@"
+    return
+  fi
+
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$timeout_sec" "$@"
+    return
+  fi
+
+  # Fallback when timeout/gtimeout is unavailable (common on macOS).
+  python3 - "$timeout_sec" "$@" <<'PY'
+import subprocess
+import sys
+
+timeout_sec = int(sys.argv[1])
+cmd = sys.argv[2:]
+
+try:
+    completed = subprocess.run(cmd, timeout=timeout_sec)
+    raise SystemExit(completed.returncode)
+except subprocess.TimeoutExpired:
+    print(f"ERROR: command timed out after {timeout_sec}s: {' '.join(cmd)}", file=sys.stderr)
+    raise SystemExit(124)
+PY
 }
 
 echo "[01/06] Phase 01: organization linkage and candidate expansion"
@@ -90,7 +122,8 @@ if [[ "$SCRAPE_ABOUT" == "true" ]]; then
       SCRAPE_OVERWRITE="false"
     fi
 
-    Rscript src/scrape_about_pages_bulk.R \
+    run_with_timeout "$SCRAPER_TIMEOUT_SEC" \
+      Rscript src/scrape_about_pages_bulk.R \
       --candidates "$MATCH_OUT/potential_asian_latino_orgs.csv" \
       --out_file "$MATCH_OUT/candidate_about_pages.csv" \
       --start_index 1 \
