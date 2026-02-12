@@ -56,6 +56,18 @@ mark_done() {
   touch "$STATE_DIR/${phase_id}.done"
 }
 
+format_duration_hms() {
+  local total_sec="$1"
+  if [[ "$total_sec" -lt 0 ]]; then
+    printf "--:--:--"
+    return
+  fi
+  local hh=$(( total_sec / 3600 ))
+  local mm=$(( (total_sec % 3600) / 60 ))
+  local ss=$(( total_sec % 60 ))
+  printf "%02d:%02d:%02d" "$hh" "$mm" "$ss"
+}
+
 echo "[01/06] Phase 01: organization linkage and candidate expansion"
 if phase_done "01"; then
   echo "  - already completed; skipping (STATE_DIR/${STATE_DIR##*/}/01.done)"
@@ -183,6 +195,7 @@ PY
       done
 
       BAR_WIDTH=32
+      BAR_T0="$(date +%s)"
       while true; do
         ALIVE=0
         for pid in "${PIDS[@]}"; do
@@ -219,7 +232,16 @@ PY
         FILLED_BAR="$(printf '%*s' "$FILLED" '' | tr ' ' '=')"
         EMPTY_BAR="$(printf '%*s' "$EMPTY" '' | tr ' ' '.')"
         PCT="$(awk "BEGIN {printf \"%.1f\", (100 * $DONE_ROWS / $TOTAL_SCRAPE_ROWS)}")"
-        printf "\r[%s%s] %s/%s (%s%%) workers_alive=%s" "$FILLED_BAR" "$EMPTY_BAR" "$DONE_ROWS" "$TOTAL_SCRAPE_ROWS" "$PCT" "$ALIVE"
+        NOW_T="$(date +%s)"
+        ELAPSED_SEC=$(( NOW_T - BAR_T0 ))
+        if [[ "$DONE_ROWS" -gt 0 ]]; then
+          ETA_SEC=$(( ELAPSED_SEC * (TOTAL_SCRAPE_ROWS - DONE_ROWS) / DONE_ROWS ))
+        else
+          ETA_SEC=-1
+        fi
+        ELAPSED_TXT="$(format_duration_hms "$ELAPSED_SEC")"
+        ETA_TXT="$(format_duration_hms "$ETA_SEC")"
+        printf "\r[%s%s] %s/%s (%s%%) workers_alive=%s elapsed=%s ETA=%s" "$FILLED_BAR" "$EMPTY_BAR" "$DONE_ROWS" "$TOTAL_SCRAPE_ROWS" "$PCT" "$ALIVE" "$ELAPSED_TXT" "$ETA_TXT"
 
         if [[ "$ALIVE" -eq 0 ]]; then
           break
