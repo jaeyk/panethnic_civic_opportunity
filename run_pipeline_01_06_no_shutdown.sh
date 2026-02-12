@@ -33,14 +33,11 @@ SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 SHUTDOWN_ON_COMPLETE="${SHUTDOWN_ON_COMPLETE:-false}"
 TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
 SAFETY_DICT="${SAFETY_DICT:-misc/safety_net_dictionary.csv}"
-ML_OUT="${ML_OUT:-processed_data/ml_validation}"
-ASIAN_GT="${ASIAN_GT:-raw_data/org_data_ground_truth/asian_org.csv}"
-LATINO_GT="${LATINO_GT:-raw_data/org_data_ground_truth/latino_org.csv}"
 
 # About-page scraping is required for downstream issue attributes.
 SCRAPE_ABOUT="${SCRAPE_ABOUT:-true}"
 
-mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT" "$TOPIC_OUT" "$ML_OUT"
+mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT" "$TOPIC_OUT"
 
 phase_done() {
   local phase_id="$1"
@@ -120,25 +117,7 @@ else
   mark_done "01c"
 fi
 
-echo "[01d/06] Phase 01d: supervised ML validation/filtering (SuperLearner)"
-if phase_done "01d"; then
-  echo "  - already completed; skipping"
-else
-  Rscript src/train_validate_panethnic_ml.R \
-    --asian_input "$ASIAN_GT" \
-    --latino_input "$LATINO_GT" \
-    --matches_input "$MATCH_OUT/org_to_irs_matches.csv" \
-    --about_input "$ABOUT_PAGES_INPUT" \
-    --candidates_input "$MATCH_OUT/similar_org_candidates.csv" \
-    --out_dir "$ML_OUT"
-  mark_done "01d"
-fi
-
 CANDIDATES_FOR_ENRICH="$MATCH_OUT/similar_org_candidates.csv"
-if [[ -f "$ML_OUT/candidate_predictions_pass_ml_filter.csv" ]]; then
-  CANDIDATES_FOR_ENRICH="$ML_OUT/candidate_predictions_pass_ml_filter.csv"
-  echo "Using ML-pass candidates for enrichment: $CANDIDATES_FOR_ENRICH"
-fi
 
 echo "[02/06] Phase 04: civic opportunity + organization type enrichment"
 if phase_done "02"; then

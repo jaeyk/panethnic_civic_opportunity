@@ -39,6 +39,11 @@ parse_args <- function(args) {
 }
 
 normalize_ein <- function(x) sprintf("%09s", gsub("[^0-9]", "", as.character(x)))
+normalize_fips <- function(x) {
+  y <- gsub("[^0-9]", "", as.character(x))
+  y[y == ""] <- NA_character_
+  sprintf("%05s", y)
+}
 
 to_flag <- function(x) {
   y <- trimws(as.character(x))
@@ -54,7 +59,42 @@ regex_detect <- function(x, patterns) {
   grepl(p, tolower(x), perl = TRUE)
 }
 
-infer_panethnic_group <- function(name, about_text = NA_character_) {
+detect_panethnic_service_scope <- function(about_text) {
+  txt <- tolower(as.character(about_text))
+  txt[is.na(txt)] <- ""
+
+  action_pat <- "(serve|serves|serving|support|supports|supporting|provide|provides|providing|advocate|advocates|advocating|organize|organizes|organizing|empower|empowers|empowering)"
+  connector_pat <- "(.{0,80}\\b(for|to|with|among|within|across|in)\\b.{0,80})?"
+
+  asian_target_pat <- "(asian\\s+american[s]?|aapi|api|asian[s]?|pacific\\s+islander[s]?|apida)"
+  latino_target_pat <- "(latino[s]?|latina[s]?|latinx|hispanic[s]?|latine)"
+
+  asian_scope <- grepl(
+    paste0("\\b", action_pat, "\\b", connector_pat, ".{0,80}\\b", asian_target_pat, "\\b"),
+    txt, perl = TRUE
+  ) | grepl(
+    paste0("\\b", asian_target_pat, "\\b.{0,80}\\b(community|communities|famil(y|ies)|residents|youth|people)\\b"),
+    txt, perl = TRUE
+  )
+
+  latino_scope <- grepl(
+    paste0("\\b", action_pat, "\\b", connector_pat, ".{0,80}\\b", latino_target_pat, "\\b"),
+    txt, perl = TRUE
+  ) | grepl(
+    paste0("\\b", latino_target_pat, "\\b.{0,80}\\b(community|communities|famil(y|ies)|residents|youth|people)\\b"),
+    txt, perl = TRUE
+  )
+
+  ifelse(asian_scope & latino_scope, "both",
+  ifelse(asian_scope, "asian",
+  ifelse(latino_scope, "latino", "uncertain")))
+}
+
+infer_panethnic_group <- function(name, about_text = NA_character_, service_scope_group = NULL) {
+  if (is.null(service_scope_group)) {
+    service_scope_group <- detect_panethnic_service_scope(about_text)
+  }
+
   txt <- tolower(paste(name, about_text))
 
   asian_strong <- c(
@@ -86,9 +126,10 @@ infer_panethnic_group <- function(name, about_text = NA_character_) {
   a_score <- as.integer(a_strong) * 2L + as.integer(a_weak)
   l_score <- as.integer(l_strong) * 2L + as.integer(l_weak)
 
-  out <- ifelse(a_score == 0 & l_score == 0, "uncertain",
+  out <- ifelse(service_scope_group %in% c("asian", "latino", "both"), service_scope_group,
+         ifelse(a_score == 0 & l_score == 0, "uncertain",
          ifelse(a_score > l_score, "asian",
-         ifelse(l_score > a_score, "latino", "both")))
+         ifelse(l_score > a_score, "latino", "both"))))
   out
 }
 
@@ -124,7 +165,8 @@ load_candidate_matches <- function(candidates_path, about_path, include_uncertai
   }
   if (!"about_page_text" %in% names(cand)) cand[, about_page_text := NA_character_]
 
-  cand[, inferred_group := infer_panethnic_group(irs_name_raw, about_page_text)]
+  cand[, service_scope_group := detect_panethnic_service_scope(about_page_text)]
+  cand[, inferred_group := infer_panethnic_group(irs_name_raw, about_page_text, service_scope_group)]
   cand[, origin := "expanded_candidate"]
   cand <- cand[candidate_type %in% c("direct_panethnic", "ethnic_named", "unique_or_neighbor")]
 
@@ -133,7 +175,10 @@ load_candidate_matches <- function(candidates_path, about_path, include_uncertai
   }
 
   cand[, panethnic_group := inferred_group]
-  keep <- c("ein", "origin", "panethnic_group", "irs_name_raw", "irs_state", "irs_city", "preferred_link", "candidate_type", "about_page_text")
+  keep <- c(
+    "ein", "origin", "panethnic_group", "irs_name_raw", "irs_state", "irs_city",
+    "preferred_link", "candidate_type", "service_scope_group", "about_page_text"
+  )
   keep <- keep[keep %in% names(cand)]
   unique(cand[, ..keep])
 }
@@ -145,6 +190,11 @@ load_civic_features <- function(org_act_path, nonweb_path, pred_path) {
 
   org[, ein := normalize_ein(ein)]
   nonweb[, ein := normalize_ein(ein)]
+  if ("fips" %in% names(nonweb)) {
+    nonweb[, irs_county_fips := normalize_fips(fips)]
+  } else {
+    nonweb[, irs_county_fips := NA_character_]
+  }
   pred[, ein := normalize_ein(ein)]
 
   civic_cols <- c("take_action", "volunteer", "advocacy", "services", "membership", "events", "chapters", "board", "press", "donations", "resources")
@@ -158,7 +208,7 @@ load_civic_features <- function(org_act_path, nonweb_path, pred_path) {
   pred_keep <- pred_keep[pred_keep %in% names(pred)]
   pred <- pred[, ..pred_keep]
 
-  list(org = org, nonweb = nonweb[, .(ein, volunteer_nonweb, member_nonweb)], pred = pred)
+  list(org = org, nonweb = nonweb[, .(ein, volunteer_nonweb, member_nonweb, irs_county_fips)], pred = pred)
 }
 
 main <- function() {

@@ -44,6 +44,12 @@ norm_group <- function(x) {
   y
 }
 
+normalize_geo_id <- function(x) {
+  y <- gsub("[^0-9]", "", as.character(x))
+  y[y == ""] <- NA_character_
+  sprintf("%05s", y)
+}
+
 get_year_col <- function(dt) {
   opts <- c("F.year", "fnd_yr", "founding_year")
   hit <- opts[opts %in% names(dt)]
@@ -51,51 +57,106 @@ get_year_col <- function(dt) {
   hit[[1]]
 }
 
-build_org_place_series <- function(org_dt, places_dt, start_year) {
-  if (!all(c("ein", "irs_city", "irs_state", "panethnic_group") %in% names(org_dt))) {
-    stop("org_enriched file must include ein, irs_city, irs_state, panethnic_group")
+get_county_col <- function(dt) {
+  opts <- c("irs_county_fips", "county_fips", "county_geoid", "fips_county", "county_geo_id")
+  hit <- opts[opts %in% names(dt)]
+  if (length(hit) == 0) {
+    stop("County-level gap analysis requires one of these columns in org_enriched: irs_county_fips, county_fips, county_geoid, fips_county, county_geo_id")
   }
-  if (!all(c("city", "state_abbr", "geo_id") %in% names(places_dt))) {
-    stop("places_input must include city, state_abbr, geo_id")
+  hit[[1]]
+}
+
+to_binary <- function(x) {
+  y <- suppressWarnings(as.numeric(x))
+  out <- rep(NA_real_, length(y))
+  out[!is.na(y)] <- ifelse(y[!is.na(y)] > 0, 1, 0)
+  out
+}
+
+build_org_county_series <- function(org_dt, start_year) {
+  req <- c("ein", "panethnic_group")
+  if (!all(req %in% names(org_dt))) {
+    stop("org_enriched file must include ein and panethnic_group")
   }
 
   year_col <- get_year_col(org_dt)
+  county_col <- get_county_col(org_dt)
+
   org_dt[, year := suppressWarnings(as.integer(get(year_col)))]
   org_dt[, panethnic_group := norm_group(panethnic_group)]
-  org_dt <- org_dt[!is.na(year) & year >= start_year & panethnic_group %in% c("asian", "latino")]
+  org_dt[, geo_id := normalize_geo_id(get(county_col))]
 
-  places_dt[, city_norm := toupper(trimws(city))]
-  places_dt[, state_norm := toupper(trimws(state_abbr))]
-  org_dt[, city_norm := toupper(trimws(irs_city))]
-  org_dt[, state_norm := toupper(trimws(irs_state))]
+  if ("county_name" %in% names(org_dt)) {
+    org_dt[, county_name := trimws(as.character(county_name))]
+  } else if ("irs_county" %in% names(org_dt)) {
+    org_dt[, county_name := trimws(as.character(irs_county))]
+  } else {
+    org_dt[, county_name := NA_character_]
+  }
 
-  org_sel <- merge(
-    org_dt,
-    places_dt[, .(geo_id, city, state_abbr, region_focus, city_norm, state_norm)],
-    by = c("city_norm", "state_norm"),
-    all = FALSE
-  )
+  for (cc in c("membership", "events", "volunteer", "take_action")) {
+    if (!cc %in% names(org_dt)) org_dt[, (cc) := NA_real_]
+  }
 
-  if (nrow(org_sel) == 0L) return(data.table())
+  org_dt[, membership_bin := to_binary(membership)]
+  org_dt[, events_bin := to_binary(events)]
+  org_dt[, volunteer_bin := to_binary(volunteer)]
+  org_dt[, take_action_bin := to_binary(take_action)]
 
-  annual <- org_sel[, .(new_orgs = uniqueN(ein)), by = .(geo_id, city, state_abbr, region_focus, panethnic_group, year)]
+  org_dt[, civic_any_four := as.integer(
+    pmax(
+      fifelse(is.na(membership_bin), 0, membership_bin),
+      fifelse(is.na(events_bin), 0, events_bin),
+      fifelse(is.na(volunteer_bin), 0, volunteer_bin),
+      fifelse(is.na(take_action_bin), 0, take_action_bin)
+    ) > 0
+  )]
+
+  # Restrict to organizations that provide civic opportunity in at least one of four IRS activity dimensions.
+  org_dt <- org_dt[
+    !is.na(year) &
+      year >= start_year &
+      panethnic_group %in% c("asian", "latino") &
+      !is.na(geo_id) & geo_id != "00000" &
+      civic_any_four == 1
+  ]
+
+  if (nrow(org_dt) == 0L) return(data.table())
+
+  org_dt[, county_name_nonempty := fifelse(!is.na(county_name) & county_name != "", county_name, NA_character_)]
+
+  annual <- org_dt[, .(
+    new_orgs = uniqueN(ein),
+    county_name = county_name_nonempty[which.max(!is.na(county_name_nonempty))]
+  ), by = .(geo_id, year, panethnic_group)]
+
   setorder(annual, geo_id, panethnic_group, year)
   annual[, cumulative_orgs := cumsum(new_orgs), by = .(geo_id, panethnic_group)]
   annual
 }
 
-build_pop_place_series <- function(pop_dt, start_year) {
+build_pop_county_series <- function(pop_dt, start_year) {
   pop_dt[, year := suppressWarnings(as.integer(year))]
-  places <- pop_dt[tolower(geo_level) == "place" & !is.na(year) & year >= start_year]
-  if (nrow(places) == 0L) return(data.table())
+  pop_dt[, geo_id := normalize_geo_id(geo_id)]
+
+  county <- pop_dt[
+    tolower(geo_level) == "county" &
+      !is.na(year) &
+      year >= start_year &
+      !is.na(geo_id) & geo_id != "00000"
+  ]
+
+  if (nrow(county) == 0L) return(data.table())
+
+  county[, county_name := trimws(as.character(geo_name))]
+  county[, population_total := suppressWarnings(as.numeric(population_total))]
 
   out <- rbindlist(list(
-    places[, .(geo_id = as.character(geo_id), year, panethnic_group = "asian", population = suppressWarnings(as.numeric(population_asian)))],
-    places[, .(geo_id = as.character(geo_id), year, panethnic_group = "latino", population = suppressWarnings(as.numeric(population_latino)))]
+    county[, .(geo_id, county_name, year, panethnic_group = "asian", population = suppressWarnings(as.numeric(population_asian)), population_total)],
+    county[, .(geo_id, county_name, year, panethnic_group = "latino", population = suppressWarnings(as.numeric(population_latino)), population_total)]
   ), fill = TRUE)
 
-  out <- out[!is.na(population) & population > 0]
-  out
+  out[!is.na(population) & population > 0]
 }
 
 score_gap <- function(panel_dt) {
@@ -112,8 +173,8 @@ score_gap <- function(panel_dt) {
     o0 <- cumulative_orgs[which.min(year)]
     o1 <- cumulative_orgs[which.max(year)]
 
-    org_per_100k_0 <- ifelse(is.na(p0) || p0 <= 0, NA_real_, o0 / p0 * 100000)
-    org_per_100k_1 <- ifelse(is.na(p1) || p1 <= 0, NA_real_, o1 / p1 * 100000)
+    org_per_100k_0 <- ifelse(!is.na(p0) && p0 > 0, o0 / p0 * 100000, NA_real_)
+    org_per_100k_1 <- ifelse(!is.na(p1) && p1 > 0, o1 / p1 * 100000, NA_real_)
 
     .(
       year_start = y0,
@@ -128,7 +189,7 @@ score_gap <- function(panel_dt) {
       org_per_100k_end = org_per_100k_1,
       org_per_100k_change = org_per_100k_1 - org_per_100k_0
     )
-  }, by = .(geo_id, city, state_abbr, region_focus, panethnic_group)]
+  }, by = .(geo_id, county_name, panethnic_group)]
 
   stats[, gap_growth_pct := pop_growth_pct - org_growth_pct]
   stats[, abs_gap_growth_pct := abs(gap_growth_pct)]
@@ -150,20 +211,17 @@ select_cases <- function(scores, top_n = 5L) {
 }
 
 build_region_scores <- function(panel_dt) {
-  dt <- copy(panel_dt)
-  dt[is.na(region_focus) | trimws(region_focus) == "", region_focus := "unknown"]
+  if (nrow(panel_dt) == 0L) return(data.table())
 
-  reg <- dt[, .(
+  nat <- panel_dt[, .(
     population = sum(population, na.rm = TRUE),
     cumulative_orgs = sum(cumulative_orgs, na.rm = TRUE)
-  ), by = .(region_focus, panethnic_group, year)]
+  ), by = .(panethnic_group, year)]
 
-  reg[, geo_id := region_focus]
-  reg[, city := region_focus]
-  reg[, state_abbr := NA_character_]
-  reg[, region_focus := region_focus]
+  nat[, geo_id := "national"]
+  nat[, county_name := "national"]
 
-  score_gap(reg)
+  score_gap(nat)
 }
 
 classify_urbanicity <- function(pop_total, urban_cutoff = 50000L, suburban_cutoff = 10000L) {
@@ -181,76 +239,86 @@ main <- function() {
   org_dt <- fread(cfg$org_enriched, encoding = "UTF-8")
   pop_dt <- fread(cfg$population, encoding = "UTF-8")
 
-  places_dt <- if (file.exists(cfg$places_input)) fread(cfg$places_input, encoding = "UTF-8") else data.table()
-  if (nrow(places_dt) == 0L) {
-    fwrite(data.table(), file.path(cfg$out_dir, "place_gap_scores.csv"))
-    fwrite(data.table(), file.path(cfg$out_dir, "selected_gap_cases.csv"))
+  org_county <- build_org_county_series(org_dt, cfg$start_year)
+  pop_county <- build_pop_county_series(pop_dt, cfg$start_year)
+
+  if (nrow(org_county) == 0L || nrow(pop_county) == 0L) {
+    fwrite(data.table(), file.path(cfg$out_dir, "county_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "selected_county_cases.csv"))
     fwrite(data.table(), file.path(cfg$out_dir, "region_gap_scores.csv"))
     fwrite(data.table(), file.path(cfg$out_dir, "urbanicity_gap_scores.csv"))
+
+    # Backward-compatible filenames used by later pipeline steps.
+    fwrite(data.table(), file.path(cfg$out_dir, "place_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "selected_gap_cases.csv"))
     fwrite(data.table(), file.path(cfg$out_dir, "selected_places_from_gaps.csv"))
-    message("places_input is empty or missing. Wrote empty gap-analysis outputs.")
+
+    message("Insufficient county-level input: org_county or pop_county is empty. Ensure org_enriched has county FIPS and population has county rows.")
     return(invisible(NULL))
   }
 
-  if (!"region_focus" %in% names(places_dt)) places_dt[, region_focus := NA_character_]
-  places_dt[, geo_id := as.character(geo_id)]
-
-  org_place <- build_org_place_series(org_dt, places_dt, cfg$start_year)
-  pop_place <- build_pop_place_series(pop_dt, cfg$start_year)
-
   panel <- merge(
-    org_place,
-    pop_place,
+    org_county,
+    pop_county,
     by = c("geo_id", "year", "panethnic_group"),
-    all = FALSE
+    all = FALSE,
+    suffixes = c("_org", "_pop")
   )
 
   if (nrow(panel) == 0L) {
+    fwrite(data.table(), file.path(cfg$out_dir, "county_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "selected_county_cases.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "region_gap_scores.csv"))
+    fwrite(data.table(), file.path(cfg$out_dir, "urbanicity_gap_scores.csv"))
+
+    # Backward-compatible filenames used by later pipeline steps.
     fwrite(data.table(), file.path(cfg$out_dir, "place_gap_scores.csv"))
     fwrite(data.table(), file.path(cfg$out_dir, "selected_gap_cases.csv"))
-    fwrite(data.table(), file.path(cfg$out_dir, "region_gap_scores.csv"))
     fwrite(data.table(), file.path(cfg$out_dir, "selected_places_from_gaps.csv"))
-    message("No overlap between org and population place series. Wrote empty outputs.")
+
+    message("No overlap between county org series and county population series. Wrote empty outputs.")
     return(invisible(NULL))
   }
 
+  panel[, county_name := fifelse(!is.na(county_name_pop) & county_name_pop != "", county_name_pop, county_name_org)]
+
   scores <- score_gap(panel)
-  pop_places_all <- pop_dt[tolower(geo_level) == "place"]
-  pop_places_all[, year := suppressWarnings(as.integer(year))]
-  pop_places_all[, geo_id := as.character(geo_id)]
-  pop_places_all[, population_total := suppressWarnings(as.numeric(population_total))]
-  latest_tot <- pop_places_all[!is.na(year), .SD[which.max(year)], by = geo_id]
-  latest_tot[, urbanicity := classify_urbanicity(population_total, cfg$urban_cutoff, cfg$suburban_cutoff)]
 
-  if ("urbanicity" %in% names(places_dt)) {
-    places_dt[, geo_id := as.character(geo_id)]
-    manual_u <- unique(places_dt[, .(geo_id, urbanicity_manual = tolower(trimws(as.character(urbanicity))))])
-    scores <- merge(scores, manual_u, by = "geo_id", all.x = TRUE)
-  } else {
-    scores[, urbanicity_manual := NA_character_]
-  }
+  county_pop <- pop_county[, .(population_total_latest = population_total[which.max(year)]), by = geo_id]
+  county_pop[, urbanicity := classify_urbanicity(population_total_latest, cfg$urban_cutoff, cfg$suburban_cutoff)]
 
-  scores <- merge(scores, latest_tot[, .(geo_id, population_total_latest = population_total, urbanicity_auto = urbanicity)], by = "geo_id", all.x = TRUE)
-  scores[, urbanicity := fifelse(!is.na(urbanicity_manual) & urbanicity_manual != "", urbanicity_manual, urbanicity_auto)]
-
+  scores <- merge(scores, county_pop, by = "geo_id", all.x = TRUE)
   selected <- select_cases(scores, top_n = cfg$top_n)
   region_scores <- build_region_scores(panel)
+
   urbanicity_scores <- scores[, .(
-    place_n = uniqueN(geo_id),
+    county_n = uniqueN(geo_id),
     median_gap_growth_pct = median(gap_growth_pct, na.rm = TRUE),
     mean_gap_growth_pct = mean(gap_growth_pct, na.rm = TRUE),
     median_org_per_100k_change = median(org_per_100k_change, na.rm = TRUE)
   ), by = .(urbanicity, panethnic_group)]
 
-  selected_places <- unique(selected[, .(city, state_abbr, geo_id, region_focus, urbanicity, panethnic_group, case_type)])
+  selected_places <- unique(selected[, .(
+    city = county_name,
+    state_abbr = NA_character_,
+    geo_id,
+    region_focus = "county",
+    urbanicity,
+    panethnic_group,
+    case_type
+  )])
 
-  fwrite(scores, file.path(cfg$out_dir, "place_gap_scores.csv"))
-  fwrite(selected, file.path(cfg$out_dir, "selected_gap_cases.csv"))
+  fwrite(scores, file.path(cfg$out_dir, "county_gap_scores.csv"))
+  fwrite(selected, file.path(cfg$out_dir, "selected_county_cases.csv"))
   fwrite(region_scores, file.path(cfg$out_dir, "region_gap_scores.csv"))
   fwrite(urbanicity_scores, file.path(cfg$out_dir, "urbanicity_gap_scores.csv"))
+
+  # Backward-compatible filenames.
+  fwrite(scores, file.path(cfg$out_dir, "place_gap_scores.csv"))
+  fwrite(selected, file.path(cfg$out_dir, "selected_gap_cases.csv"))
   fwrite(selected_places, file.path(cfg$out_dir, "selected_places_from_gaps.csv"))
 
-  message(sprintf("Done. Scored places: %s | Selected cases: %s",
+  message(sprintf("Done. Scored counties: %s | Selected cases: %s",
                   format(nrow(scores), big.mark = ","),
                   format(nrow(selected), big.mark = ",")))
 }

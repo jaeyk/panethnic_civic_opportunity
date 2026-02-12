@@ -23,7 +23,7 @@ Method documentation:
 
 ## Output directories
 
-- `processed_data/`: intermediate and pipeline-stage data products (matching, enrichment, population panel, gap tables, ML filtering, topic scoring).
+- `processed_data/`: intermediate and pipeline-stage data products (matching, enrichment, population panel, gap tables, topic scoring).
 - `outputs/figures/`: presentation-ready figures.
 - `outputs/tables/`: presentation/export tables (if created in downstream reporting workflows).
 
@@ -91,9 +91,16 @@ Phase 04: Add civic opportunity and organization type
   - `https://github.com/snfagora/american_civic_opportunity_datasets/tree/main/src`
 - Deliverable:
   - a consolidated table for Asian American and Latino organizations with EIN, matched name, org type, and civic opportunity indicators (membership, volunteering, events, civic/political action and related fields).
+- Panethnic classification rule (in enrichment):
+  - classify as panethnic when either the organization name signals panethnic relevance, or the about-page text explicitly indicates panethnic service scope.
+  - about-page service-scope signal takes precedence when present.
+  - subgroup-named organizations are included when they explicitly state panethnic service (e.g., a Chinese organization serving Asian Americans; a Mexican organization serving Latino/Latina/Latinx communities).
 
 Phase 05: Add Census population trends and estimate the representation gap
 - Goal: test whether Asian American and Latino population growth has outpaced growth in corresponding organizations over the longest feasible horizon (target start: 1980, depending on data availability and comparability).
+- Organization scope for gap analysis:
+  - restrict to Asian American and Latino organizations that provide civic opportunity in at least one IRS activity dimension: `membership`, `events`, `volunteer`, or `take_action`.
+  - treat each of these four dimensions as binary indicators.
 - Population source:
   - U.S. Census Bureau decennial Census + ACS.
   - Use decennial series for early historical coverage (including 1980 onward where available), then harmonize with ACS-era estimates for recent years.
@@ -106,12 +113,16 @@ Phase 05: Add Census population trends and estimate the representation gap
 - Core comparison outputs:
   - year-by-year growth rates for population vs. organization counts.
   - organization-per-100,000 population trends for each group.
+  - county-level population-organization growth gap:
+    - estimate population growth by county-year-group (Asian vs Latino) from Census series.
+    - estimate organization growth by county-year-group using cumulative organizations by IRS incorporation year (`fnd_yr`).
+    - compute the gap as `population growth % - organization growth %`.
   - long-run change decomposition (from the earliest comparable year, ideally 1980) showing whether civic infrastructure is keeping pace with demographic change.
   - case selection for comparisons:
-    - cities/places with the highest positive gap (`population growth > organization growth`),
-    - cities/places with the smallest gap (closest parity between population and organization growth).
+    - counties with the highest positive gap (`population growth > organization growth`),
+    - counties with the smallest gap (closest parity between population growth and organization growth).
   - urbanicity comparison:
-    - compare gap patterns across urban, suburban, and rural places.
+    - compare gap patterns across urban, suburban, and rural counties.
 - Deliverables:
   - merged annual panel with population and organization metrics.
   - summary tables/plots highlighting the population-organization growth gap.
@@ -120,6 +131,7 @@ Phase 05: Add Census population trends and estimate the representation gap
   - `src/fetch_population_series.py` (decennial + ACS pull using explicit variable map)
 - Script:
   - `src/select_gap_cases.R` (R-based gap scoring and case selection).
+  - requirement: `org_enriched` must include a county FIPS column (one of `irs_county_fips`, `county_fips`, `county_geoid`, `fips_county`, `county_geo_id`) for county-level scoring.
 
 Example (Phase 05 case selection in R):
 
@@ -146,6 +158,8 @@ python3 src/fetch_population_series.py \
 ```
 
 Phase 05 outputs:
+- `processed_data/gap_analysis/county_gap_scores.csv`
+- `processed_data/gap_analysis/selected_county_cases.csv`
 - `processed_data/gap_analysis/place_gap_scores.csv`
 - `processed_data/gap_analysis/selected_gap_cases.csv`
 - `processed_data/gap_analysis/region_gap_scores.csv`
@@ -254,15 +268,14 @@ Additional scripts used for large-scale candidate scraping and content scoring:
 Note:
 - In the current runtime environment, external DNS/network calls are blocked, so webpage scraping attempts return timeout errors. Topic counts will remain zero until scraping is run in a network-enabled environment.
 
-## Pipeline execution order (01-07)
+## Pipeline execution order (01-06)
 
 1. `01`: matching/expansion (`src/match_and_expand_orgs.R`)
 2. `01b`: resumable bulk scraping (`src/scrape_about_pages_bulk.R`)
 3. `01c`: about-page topic scoring (`src/analyze_about_topics.R`)
-4. `01d`: supervised ML validation/filtering (`src/train_validate_panethnic_ml.R`)
-5. `02`: enrichment (`src/enrich_org_civic_type.R`) using ML-pass candidates when available
-6. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
-7. `05` + `06`: visualization + completion/shutdown behavior in runner
+4. `02`: enrichment (`src/enrich_org_civic_type.R`) using `processed_data/org_matching/similar_org_candidates.csv`
+5. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
+6. `05` + `06`: visualization + completion/shutdown behavior in runner
 
 Run-all script:
 
