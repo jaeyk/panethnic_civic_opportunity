@@ -59,7 +59,7 @@ mark_done() {
 format_duration_hms() {
   local total_sec="$1"
   if [[ "$total_sec" -lt 0 ]]; then
-    printf "--:--:--"
+    printf '%s' "--:--:--"
     return
   fi
   local hh=$(( total_sec / 3600 ))
