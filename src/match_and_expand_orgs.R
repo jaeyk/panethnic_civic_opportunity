@@ -250,7 +250,25 @@ load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks, max_irs_rows = NA_i
 best_match_one_fuzzy <- function(org_row, irs_dt, fallback_n = 25000L) {
   nm <- org_row[["org_name_norm"]]
   candidates <- prepare_candidates(org_row, irs_dt, fallback_n = fallback_n)
+  if (nrow(candidates) == 0L) {
+    return(data.table(
+      org_id = org_row[["org_id"]],
+      ein = NA_character_,
+      match_score = NA_real_,
+      candidate_n = 0L,
+      matching_method = "fuzzy"
+    ))
+  }
   scores <- compute_similarity(nm, candidates$irs_name_norm)
+  if (length(scores) == 0L || all(is.na(scores))) {
+    return(data.table(
+      org_id = org_row[["org_id"]],
+      ein = NA_character_,
+      match_score = NA_real_,
+      candidate_n = nrow(candidates),
+      matching_method = "fuzzy"
+    ))
+  }
   idx <- which.max(scores)
 
   data.table(
