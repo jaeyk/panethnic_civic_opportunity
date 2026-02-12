@@ -28,7 +28,11 @@ HIST_POP_INPUT="${HIST_POP_INPUT:-raw_data/population_manual_1980_2008.csv}"
 TOP_N="${TOP_N:-5}"
 START_YEAR="${START_YEAR:-1980}"
 SCRAPE_LIMIT="${SCRAPE_LIMIT:-500}"
-SCRAPER_TIMEOUT_SEC="${SCRAPER_TIMEOUT_SEC:-700}"
+SCRAPE_WORKERS="${SCRAPE_WORKERS:-4}"
+SCRAPE_PAGE_TIMEOUT_SEC="${SCRAPE_PAGE_TIMEOUT_SEC:-40}"
+SCRAPE_BATCH_SIZE="${SCRAPE_BATCH_SIZE:-50}"
+SCRAPE_RETRIES="${SCRAPE_RETRIES:-2}"
+SCRAPE_RETRY_WAIT_SEC="${SCRAPE_RETRY_WAIT_SEC:-2}"
 CENSUS_API_KEY="${CENSUS_API_KEY:-}"
 SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
@@ -50,37 +54,6 @@ phase_done() {
 mark_done() {
   local phase_id="$1"
   touch "$STATE_DIR/${phase_id}.done"
-}
-
-run_with_timeout() {
-  local timeout_sec="$1"
-  shift
-
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$timeout_sec" "$@"
-    return
-  fi
-
-  if command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$timeout_sec" "$@"
-    return
-  fi
-
-  # Fallback when timeout/gtimeout is unavailable (common on macOS).
-  python3 - "$timeout_sec" "$@" <<'PY'
-import subprocess
-import sys
-
-timeout_sec = int(sys.argv[1])
-cmd = sys.argv[2:]
-
-try:
-    completed = subprocess.run(cmd, timeout=timeout_sec)
-    raise SystemExit(completed.returncode)
-except subprocess.TimeoutExpired:
-    print(f"ERROR: command timed out after {timeout_sec}s: {' '.join(cmd)}", file=sys.stderr)
-    raise SystemExit(124)
-PY
 }
 
 echo "[01/06] Phase 01: organization linkage and candidate expansion"
@@ -122,13 +95,196 @@ if [[ "$SCRAPE_ABOUT" == "true" ]]; then
       SCRAPE_OVERWRITE="false"
     fi
 
-    run_with_timeout "$SCRAPER_TIMEOUT_SEC" \
-      Rscript src/scrape_about_pages_bulk.R \
-      --candidates "$MATCH_OUT/potential_asian_latino_orgs.csv" \
-      --out_file "$MATCH_OUT/candidate_about_pages.csv" \
-      --start_index 1 \
-      --batch_size 100 \
-      --overwrite "$SCRAPE_OVERWRITE"
+    CANDIDATES_FILE="$MATCH_OUT/potential_asian_latino_orgs.csv"
+    TOTAL_SCRAPE_ROWS="$(python3 - "$CANDIDATES_FILE" <<'PY'
+import csv
+import sys
+
+path = sys.argv[1]
+count = 0
+with open(path, "r", encoding="utf-8", newline="") as f:
+    for row in csv.DictReader(f):
+        if (row.get("preferred_link") or "").strip():
+            count += 1
+print(count)
+PY
+)"
+
+    if [[ "$TOTAL_SCRAPE_ROWS" -eq 0 ]]; then
+      echo "No candidates with preferred_link to scrape."
+      python3 src/scrape_about_pages_browser.py \
+        --candidates "$CANDIDATES_FILE" \
+        --out_file "$ABOUT_PAGES_INPUT" \
+        --start_index 1 \
+        --batch_size "$SCRAPE_BATCH_SIZE" \
+        --overwrite "$SCRAPE_OVERWRITE" \
+        --timeout_sec "$SCRAPE_PAGE_TIMEOUT_SEC" \
+        --retries "$SCRAPE_RETRIES" \
+        --retry_wait_sec "$SCRAPE_RETRY_WAIT_SEC" \
+        --headless true \
+        --same_domain_only true
+    elif [[ "$SCRAPE_WORKERS" -le 1 ]]; then
+      python3 src/scrape_about_pages_browser.py \
+        --candidates "$CANDIDATES_FILE" \
+        --out_file "$ABOUT_PAGES_INPUT" \
+        --start_index 1 \
+        --batch_size "$SCRAPE_BATCH_SIZE" \
+        --overwrite "$SCRAPE_OVERWRITE" \
+        --timeout_sec "$SCRAPE_PAGE_TIMEOUT_SEC" \
+        --retries "$SCRAPE_RETRIES" \
+        --retry_wait_sec "$SCRAPE_RETRY_WAIT_SEC" \
+        --headless true \
+        --same_domain_only true
+    else
+      WORKERS="$SCRAPE_WORKERS"
+      if [[ "$WORKERS" -gt "$TOTAL_SCRAPE_ROWS" ]]; then
+        WORKERS="$TOTAL_SCRAPE_ROWS"
+      fi
+
+      PART_DIR="$MATCH_OUT/candidate_about_pages_parts"
+      mkdir -p "$PART_DIR"
+      CHUNK_SIZE=$(( (TOTAL_SCRAPE_ROWS + WORKERS - 1) / WORKERS ))
+      PIDS=()
+      PART_FILES=()
+      WORKER_LOGS=()
+
+      echo "Parallel scraping: rows=$TOTAL_SCRAPE_ROWS workers=$WORKERS chunk_size=$CHUNK_SIZE"
+
+      for ((w = 1; w <= WORKERS; w++)); do
+        START_IDX=$(( (w - 1) * CHUNK_SIZE + 1 ))
+        END_IDX=$(( w * CHUNK_SIZE ))
+        if [[ "$END_IDX" -gt "$TOTAL_SCRAPE_ROWS" ]]; then
+          END_IDX="$TOTAL_SCRAPE_ROWS"
+        fi
+        if [[ "$START_IDX" -gt "$TOTAL_SCRAPE_ROWS" ]]; then
+          break
+        fi
+
+        PART_FILE="$PART_DIR/candidate_about_pages.part${w}.csv"
+        LOG_FILE="$PART_DIR/candidate_about_pages.part${w}.log"
+        PART_FILES+=("$PART_FILE")
+        WORKER_LOGS+=("$LOG_FILE")
+        echo "  - worker $w scraping indices ${START_IDX}-${END_IDX} -> ${PART_FILE}"
+        : > "$LOG_FILE"
+
+        python3 src/scrape_about_pages_browser.py \
+          --candidates "$CANDIDATES_FILE" \
+          --out_file "$PART_FILE" \
+          --start_index "$START_IDX" \
+          --end_index "$END_IDX" \
+          --batch_size "$SCRAPE_BATCH_SIZE" \
+          --overwrite "$SCRAPE_OVERWRITE" \
+          --timeout_sec "$SCRAPE_PAGE_TIMEOUT_SEC" \
+          --retries "$SCRAPE_RETRIES" \
+          --retry_wait_sec "$SCRAPE_RETRY_WAIT_SEC" \
+          --headless true \
+          --same_domain_only true > "$LOG_FILE" 2>&1 &
+        PIDS+=("$!")
+      done
+
+      BAR_WIDTH=32
+      while true; do
+        ALIVE=0
+        for pid in "${PIDS[@]}"; do
+          if kill -0 "$pid" 2>/dev/null; then
+            ALIVE=$((ALIVE + 1))
+          fi
+        done
+
+        DONE_ROWS="$(python3 - "${PART_FILES[@]}" <<'PY'
+import csv
+import os
+import sys
+
+count = 0
+for path in sys.argv[1:]:
+    if not os.path.exists(path):
+        continue
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for _ in reader:
+            count += 1
+print(count)
+PY
+)"
+        if [[ -z "$DONE_ROWS" ]]; then
+          DONE_ROWS=0
+        fi
+        if [[ "$DONE_ROWS" -gt "$TOTAL_SCRAPE_ROWS" ]]; then
+          DONE_ROWS="$TOTAL_SCRAPE_ROWS"
+        fi
+
+        FILLED=$(( DONE_ROWS * BAR_WIDTH / TOTAL_SCRAPE_ROWS ))
+        EMPTY=$(( BAR_WIDTH - FILLED ))
+        FILLED_BAR="$(printf '%*s' "$FILLED" '' | tr ' ' '=')"
+        EMPTY_BAR="$(printf '%*s' "$EMPTY" '' | tr ' ' '.')"
+        PCT="$(awk "BEGIN {printf \"%.1f\", (100 * $DONE_ROWS / $TOTAL_SCRAPE_ROWS)}")"
+        printf "\r[%s%s] %s/%s (%s%%) workers_alive=%s" "$FILLED_BAR" "$EMPTY_BAR" "$DONE_ROWS" "$TOTAL_SCRAPE_ROWS" "$PCT" "$ALIVE"
+
+        if [[ "$ALIVE" -eq 0 ]]; then
+          break
+        fi
+        sleep 2
+      done
+      echo
+
+      FAILED=0
+      for pid in "${PIDS[@]}"; do
+        if ! wait "$pid"; then
+          FAILED=1
+        fi
+      done
+      if [[ "$FAILED" -ne 0 ]]; then
+        echo "ERROR: one or more scrape workers failed. Recent log tails:"
+        for log_file in "${WORKER_LOGS[@]}"; do
+          if [[ -f "$log_file" ]]; then
+            echo "--- ${log_file} (tail) ---"
+            tail -n 20 "$log_file" || true
+          fi
+        done
+        exit 1
+      fi
+
+      python3 - "$ABOUT_PAGES_INPUT" "${PART_FILES[@]}" <<'PY'
+import csv
+import os
+import sys
+
+out_file = sys.argv[1]
+part_files = [p for p in sys.argv[2:] if os.path.exists(p)]
+
+all_rows = []
+fieldnames = None
+for path in part_files:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames and fieldnames is None:
+            fieldnames = reader.fieldnames
+        for row in reader:
+            all_rows.append(row)
+
+if fieldnames is None:
+    fieldnames = ["ein", "preferred_link", "about_page_text", "scrape_status", "selected_about_url", "request_sec", "attempts", "error_message"]
+
+seen = set()
+dedup = []
+for row in all_rows:
+    ein = (row.get("ein") or "").strip()
+    if ein and ein in seen:
+        continue
+    if ein:
+        seen.add(ein)
+    dedup.append(row)
+
+os.makedirs(os.path.dirname(out_file), exist_ok=True)
+with open(out_file, "w", encoding="utf-8", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
+    writer.writeheader()
+    writer.writerows(dedup)
+
+print(f"Merged {len(part_files)} part files -> {out_file} ({len(dedup)} rows)")
+PY
+    fi
 
     mark_done "01b"
   fi
