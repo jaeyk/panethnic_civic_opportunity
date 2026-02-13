@@ -37,14 +37,13 @@ CENSUS_API_KEY="${CENSUS_API_KEY:-}"
 SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
 SAFETY_DICT="${SAFETY_DICT:-misc/safety_net_dictionary.csv}"
-ML_OUT="${ML_OUT:-processed_data/ml_validation}"
-ASIAN_GT="${ASIAN_GT:-raw_data/org_data_ground_truth/asian_org.csv}"
-LATINO_GT="${LATINO_GT:-raw_data/org_data_ground_truth/latino_org.csv}"
+EMBED_WORKERS="${EMBED_WORKERS:-1}"
+EMBED_CHUNK_SIZE="${EMBED_CHUNK_SIZE:-100}"
 
 # About-page scraping is required for downstream issue attributes.
 SCRAPE_ABOUT="${SCRAPE_ABOUT:-true}"
 
-mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT" "$TOPIC_OUT" "$ML_OUT"
+mkdir -p "$STATE_DIR" "$MATCH_OUT" "$ENRICH_OUT" "$(dirname "$POP_OUT")" "$GAP_OUT" "$FIG_OUT" "$TOPIC_OUT"
 
 phase_done() {
   local phase_id="$1"
@@ -89,6 +88,8 @@ else
 fi
 
 ABOUT_PAGES_INPUT="$MATCH_OUT/candidate_about_pages.csv"
+PANETHNIC_RECLASS_OUT="${PANETHNIC_RECLASS_OUT:-$MATCH_OUT/panethnic_constituency_reclass.csv}"
+PANETHNIC_RECLASS_EVIDENCE_OUT="${PANETHNIC_RECLASS_EVIDENCE_OUT:-$MATCH_OUT/panethnic_constituency_sentence_evidence.csv}"
 if [[ "$SCRAPE_ABOUT" == "true" ]]; then
   echo "[01b/06] Phase 01b: bulk about-page scraping (resumable)"
   if phase_done "01b"; then
@@ -267,45 +268,10 @@ PY
         exit 1
       fi
 
-      python3 - "$ABOUT_PAGES_INPUT" "${PART_FILES[@]}" <<'PY'
-import csv
-import os
-import sys
-
-out_file = sys.argv[1]
-part_files = [p for p in sys.argv[2:] if os.path.exists(p)]
-
-all_rows = []
-fieldnames = None
-for path in part_files:
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames and fieldnames is None:
-            fieldnames = reader.fieldnames
-        for row in reader:
-            all_rows.append(row)
-
-if fieldnames is None:
-    fieldnames = ["ein", "preferred_link", "about_page_text", "scrape_status", "selected_about_url", "request_sec", "attempts", "error_message"]
-
-seen = set()
-dedup = []
-for row in all_rows:
-    ein = (row.get("ein") or "").strip()
-    if ein and ein in seen:
-        continue
-    if ein:
-        seen.add(ein)
-    dedup.append(row)
-
-os.makedirs(os.path.dirname(out_file), exist_ok=True)
-with open(out_file, "w", encoding="utf-8", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
-    writer.writeheader()
-    writer.writerows(dedup)
-
-print(f"Merged {len(part_files)} part files -> {out_file} ({len(dedup)} rows)")
-PY
+      python3 src/merge_about_pages_parts.py \
+        --parts_glob "$PART_DIR/candidate_about_pages.part*.csv" \
+        --out_file "$ABOUT_PAGES_INPUT" \
+        --dedupe_key ein
     fi
 
     mark_done "01b"
@@ -330,25 +296,30 @@ else
   mark_done "01c"
 fi
 
-echo "[01d/06] Phase 01d: supervised ML validation/filtering (SuperLearner)"
-if phase_done "01d"; then
+echo "[01d/06] Phase 01d: sentence-level panethnic constituency reclassification"
+if phase_done "01d_reclass"; then
   echo "  - already completed; skipping"
 else
-  Rscript src/train_validate_panethnic_ml.R \
-    --asian_input "$ASIAN_GT" \
-    --latino_input "$LATINO_GT" \
-    --matches_input "$MATCH_OUT/org_to_irs_matches.csv" \
-    --about_input "$ABOUT_PAGES_INPUT" \
-    --candidates_input "$MATCH_OUT/similar_org_candidates.csv" \
-    --out_dir "$ML_OUT"
-  mark_done "01d"
+  ABOUT_FOR_RECLASS="$ABOUT_PAGES_INPUT"
+  if [[ ! -f "$ABOUT_FOR_RECLASS" && -f "$MATCH_OUT/candidate_about_pages_browser.csv" ]]; then
+    ABOUT_FOR_RECLASS="$MATCH_OUT/candidate_about_pages_browser.csv"
+  fi
+
+  if [[ -f "$ABOUT_FOR_RECLASS" ]]; then
+    python3 src/reclassify_panethnic_constituency.py \
+      --about_input "$ABOUT_FOR_RECLASS" \
+      --candidates_input "$MATCH_OUT/similar_org_candidates.csv" \
+      --out_file "$PANETHNIC_RECLASS_OUT" \
+      --evidence_file "$PANETHNIC_RECLASS_EVIDENCE_OUT" \
+      --workers "$EMBED_WORKERS" \
+      --chunk_size "$EMBED_CHUNK_SIZE"
+  else
+    echo "WARNING: no about-page file available; skipping reclassification."
+  fi
+  mark_done "01d_reclass"
 fi
 
 CANDIDATES_FOR_ENRICH="$MATCH_OUT/similar_org_candidates.csv"
-if [[ -f "$ML_OUT/candidate_predictions_pass_ml_filter.csv" ]]; then
-  CANDIDATES_FOR_ENRICH="$ML_OUT/candidate_predictions_pass_ml_filter.csv"
-  echo "Using ML-pass candidates for enrichment: $CANDIDATES_FOR_ENRICH"
-fi
 
 echo "[02/06] Phase 04: civic opportunity + organization type enrichment"
 if phase_done "02"; then
@@ -358,6 +329,7 @@ else
     --matches "$MATCH_OUT/org_to_irs_matches.csv" \
     --candidates "$CANDIDATES_FOR_ENRICH" \
     --about_pages "$ABOUT_PAGES_INPUT" \
+    --reclassifications "$PANETHNIC_RECLASS_OUT" \
     --irs_org_activities raw_data/irs_data/irs_org_activities.csv \
     --irs_nonweb_activities raw_data/irs_data/irs_nonweb_activities.csv \
     --predictions raw_data/web_data/predictions.csv \

@@ -195,7 +195,7 @@ Rscript src/visualize_growth_gap.R \
 Additional Phase 06 output:
 - `outputs/figures/urbanicity_gap_comparison.png`
 
-Phase 07: Supervised ML validation and filtering (ground truth + scraped text)
+Phase 07 (deprecated / not in default pipeline): Supervised ML validation and filtering (ground truth + scraped text)
 - Goal: add a supervised validation gate so candidate organizations are retained only when model confidence supports Asian American or Latino classification.
 - Method:
   - train on ground-truth labels (`asian_org.csv`, `latino_org.csv`),
@@ -227,6 +227,9 @@ Rscript src/train_validate_panethnic_ml.R \
   --margin_threshold 0.15
 ```
 
+Note:
+- This ML phase is not run in the default pipeline runners because training data scope (advocacy/service-heavy) is narrower than the full target universe of organizations.
+
 ## Accuracy and model performance
 
 Ground-truth rule-based classifier (`src/evaluate_org_classifier.R`):
@@ -255,6 +258,12 @@ Additional scripts used for large-scale candidate scraping and content scoring:
   - browser-rendered scraper (Playwright) that finds likely About/Who-We-Are pages via menu links
   - extracts mission/history/program-relevant text with resume support and progress logging
   - useful when static scraping returns mostly nav boilerplate or JS-heavy pages
+- `src/merge_about_pages_parts.py`:
+  - merges multi-worker part outputs into one deduplicated about-page file
+  - default dedupe key is `ein`
+- `src/dedupe_about_pages.py`:
+  - snapshots the current combined about-page file, then writes/keeps unique rows by `ein`
+  - outputs a backup file and a `candidate_about_pages_unique.csv` artifact
 - `src/analyze_about_topics.R`:
   - tags mentions of safety-net programs and democracy/organizing terms
   - uses `misc/safety_net_dictionary.csv` with state-specific aliases (e.g., `CalFresh` for CA SNAP)
@@ -264,23 +273,65 @@ Additional scripts used for large-scale candidate scraping and content scoring:
     - `processed_data/topic_analysis/about_topic_safety_program_counts.csv`
     - `processed_data/topic_analysis/about_topic_flagged_orgs.csv`
     - `processed_data/topic_analysis/about_topic_scored_all.csv`
+- `src/reclassify_panethnic_constituency.py`:
+  - sentence-level reclassification for `ethnic_named` organizations
+  - requires a sentence that mentions panethnic groups and constituency/service framing
+  - combines lexical constraints with dependency-free hash embeddings
+  - writes:
+    - `processed_data/org_matching/panethnic_constituency_reclass.csv`
+    - `processed_data/org_matching/panethnic_constituency_sentence_evidence.csv`
 
 Note:
 - In the current runtime environment, external DNS/network calls are blocked, so webpage scraping attempts return timeout errors. Topic counts will remain zero until scraping is run in a network-enabled environment.
+
+If you have worker part files and need to reproduce the merge step manually:
+
+```bash
+python3 src/merge_about_pages_parts.py \
+  --parts_glob processed_data/org_matching/candidate_about_pages_parts/candidate_about_pages.part*.csv \
+  --out_file processed_data/org_matching/candidate_about_pages.csv \
+  --dedupe_key ein
+```
+
+If you need to preserve the original combined file and create unique-only rows:
+
+```bash
+python3 src/dedupe_about_pages.py \
+  --input_file processed_data/org_matching/candidate_about_pages.csv \
+  --backup_file processed_data/org_matching/candidate_about_pages_original_backup.csv \
+  --output_file processed_data/org_matching/candidate_about_pages_unique.csv \
+  --dedupe_key ein \
+  --overwrite_input true
+```
 
 ## Pipeline execution order (01-06)
 
 1. `01`: matching/expansion (`src/match_and_expand_orgs.R`)
 2. `01b`: resumable bulk scraping (`src/scrape_about_pages_bulk.R`)
 3. `01c`: about-page topic scoring (`src/analyze_about_topics.R`)
-4. `02`: enrichment (`src/enrich_org_civic_type.R`) using `processed_data/org_matching/similar_org_candidates.csv`
-5. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
-6. `05` + `06`: visualization + completion/shutdown behavior in runner
+4. `01d`: sentence-level panethnic constituency reclassification (`src/reclassify_panethnic_constituency.py`)
+5. `02`: enrichment (`src/enrich_org_civic_type.R`) using `processed_data/org_matching/similar_org_candidates.csv`
+6. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
+7. `05` + `06`: visualization + completion/shutdown behavior in runner
 
 Run-all script:
 
 ```bash
 ./run_pipeline_01_06_and_shutdown.sh
+```
+
+Downstream-only runner (starts from existing about-page data):
+
+```bash
+./run_downstream_from_about.sh
+```
+
+Parallelism note:
+- only the embedding-based reclassification step is parallelized via `EMBED_WORKERS` (default `1` in full runners, `4` in downstream-only runner).
+- example:
+
+```bash
+EMBED_WORKERS=6 EMBED_CHUNK_SIZE=200 ./run_downstream_from_about.sh
 ```
 
 Resume behavior:

@@ -9,6 +9,7 @@ parse_args <- function(args) {
     matches = "processed_data/org_matching/org_to_irs_matches.csv",
     candidates = "processed_data/org_matching/similar_org_candidates.csv",
     about_pages = "processed_data/org_matching/candidate_about_pages.csv",
+    reclassifications = "processed_data/org_matching/panethnic_constituency_reclass.csv",
     irs_org_activities = "raw_data/irs_data/irs_org_activities.csv",
     irs_nonweb_activities = "raw_data/irs_data/irs_nonweb_activities.csv",
     predictions = "raw_data/web_data/predictions.csv",
@@ -156,8 +157,17 @@ load_candidate_matches <- function(candidates_path, about_path, include_uncertai
   }
   cand[, ein := normalize_ein(ein)]
 
-  if (file.exists(about_path)) {
-    about <- fread(about_path, encoding = "UTF-8")
+  about_path_use <- about_path
+  if (!file.exists(about_path_use)) {
+    alt_about <- sub("candidate_about_pages\\.csv$", "candidate_about_pages_browser.csv", about_path_use)
+    if (file.exists(alt_about)) {
+      about_path_use <- alt_about
+      message(sprintf("About-page file not found at %s; using %s", about_path, alt_about))
+    }
+  }
+
+  if (file.exists(about_path_use)) {
+    about <- fread(about_path_use, encoding = "UTF-8")
     if (all(c("ein", "about_page_text") %in% names(about))) {
       about[, ein := normalize_ein(ein)]
       cand <- merge(cand, unique(about[, .(ein, about_page_text)]), by = "ein", all.x = TRUE)
@@ -177,10 +187,47 @@ load_candidate_matches <- function(candidates_path, about_path, include_uncertai
   cand[, panethnic_group := inferred_group]
   keep <- c(
     "ein", "origin", "panethnic_group", "irs_name_raw", "irs_state", "irs_city",
-    "preferred_link", "candidate_type", "service_scope_group", "about_page_text"
+    "preferred_link", "candidate_type", "service_scope_group", "about_page_text",
+    "inferred_group"
   )
   keep <- keep[keep %in% names(cand)]
   unique(cand[, ..keep])
+}
+
+apply_reclassifications <- function(cand, reclass_path) {
+  if (!file.exists(reclass_path)) return(cand)
+
+  rc <- fread(reclass_path, encoding = "UTF-8")
+  if (!"ein" %in% names(rc)) return(cand)
+  rc[, ein := normalize_ein(ein)]
+
+  if ("reclass_group" %in% names(rc)) {
+    rc[, reclass_group := tolower(trimws(as.character(reclass_group)))]
+  } else if ("panethnic_group" %in% names(rc)) {
+    rc[, reclass_group := tolower(trimws(as.character(panethnic_group)))]
+  } else {
+    return(cand)
+  }
+
+  rc <- rc[reclass_group %in% c("asian", "latino", "both")]
+  if (nrow(rc) == 0L) return(cand)
+
+  keep <- c("ein", "reclass_group", "reclass_confidence", "reclass_evidence_sentence")
+  keep <- keep[keep %in% names(rc)]
+  rc <- unique(rc[, ..keep], by = "ein")
+
+  cand <- merge(cand, rc, by = "ein", all.x = TRUE)
+  cand[, inferred_group_base := inferred_group]
+  cand[, reclass_applied := as.integer(FALSE)]
+  cand[
+    candidate_type == "ethnic_named" & reclass_group %in% c("asian", "latino", "both"),
+    `:=`(
+      inferred_group = reclass_group,
+      panethnic_group = reclass_group,
+      reclass_applied = as.integer(TRUE)
+    )
+  ]
+  cand
 }
 
 load_civic_features <- function(org_act_path, nonweb_path, pred_path) {
@@ -218,6 +265,7 @@ main <- function() {
   message("Loading seed matches and expanded candidates...")
   seed <- load_seed_matches(cfg$matches)
   cand <- load_candidate_matches(cfg$candidates, cfg$about_pages, cfg$include_uncertain)
+  cand <- apply_reclassifications(cand, cfg$reclassifications)
 
   universe <- rbindlist(list(seed, cand), fill = TRUE)
   universe <- unique(universe, by = c("ein", "origin", "panethnic_group"))

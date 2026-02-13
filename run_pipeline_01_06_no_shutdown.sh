@@ -33,6 +33,8 @@ SHUTDOWN_DELAY_MIN="${SHUTDOWN_DELAY_MIN:-1}"
 SHUTDOWN_ON_COMPLETE="${SHUTDOWN_ON_COMPLETE:-false}"
 TOPIC_OUT="${TOPIC_OUT:-processed_data/topic_analysis}"
 SAFETY_DICT="${SAFETY_DICT:-misc/safety_net_dictionary.csv}"
+EMBED_WORKERS="${EMBED_WORKERS:-1}"
+EMBED_CHUNK_SIZE="${EMBED_CHUNK_SIZE:-100}"
 
 # About-page scraping is required for downstream issue attributes.
 SCRAPE_ABOUT="${SCRAPE_ABOUT:-true}"
@@ -70,6 +72,8 @@ else
 fi
 
 ABOUT_PAGES_INPUT="$MATCH_OUT/candidate_about_pages.csv"
+PANETHNIC_RECLASS_OUT="${PANETHNIC_RECLASS_OUT:-$MATCH_OUT/panethnic_constituency_reclass.csv}"
+PANETHNIC_RECLASS_EVIDENCE_OUT="${PANETHNIC_RECLASS_EVIDENCE_OUT:-$MATCH_OUT/panethnic_constituency_sentence_evidence.csv}"
 if [[ "$SCRAPE_ABOUT" == "true" ]]; then
   echo "[01b/06] Phase 01b: bulk about-page scraping (resumable)"
   if phase_done "01b"; then
@@ -117,6 +121,29 @@ else
   mark_done "01c"
 fi
 
+echo "[01d/06] Phase 01d: sentence-level panethnic constituency reclassification"
+if phase_done "01d_reclass"; then
+  echo "  - already completed; skipping"
+else
+  ABOUT_FOR_RECLASS="$ABOUT_PAGES_INPUT"
+  if [[ ! -f "$ABOUT_FOR_RECLASS" && -f "$MATCH_OUT/candidate_about_pages_browser.csv" ]]; then
+    ABOUT_FOR_RECLASS="$MATCH_OUT/candidate_about_pages_browser.csv"
+  fi
+
+  if [[ -f "$ABOUT_FOR_RECLASS" ]]; then
+    python3 src/reclassify_panethnic_constituency.py \
+      --about_input "$ABOUT_FOR_RECLASS" \
+      --candidates_input "$MATCH_OUT/similar_org_candidates.csv" \
+      --out_file "$PANETHNIC_RECLASS_OUT" \
+      --evidence_file "$PANETHNIC_RECLASS_EVIDENCE_OUT" \
+      --workers "$EMBED_WORKERS" \
+      --chunk_size "$EMBED_CHUNK_SIZE"
+  else
+    echo "WARNING: no about-page file available; skipping reclassification."
+  fi
+  mark_done "01d_reclass"
+fi
+
 CANDIDATES_FOR_ENRICH="$MATCH_OUT/similar_org_candidates.csv"
 
 echo "[02/06] Phase 04: civic opportunity + organization type enrichment"
@@ -127,6 +154,7 @@ else
     --matches "$MATCH_OUT/org_to_irs_matches.csv" \
     --candidates "$CANDIDATES_FOR_ENRICH" \
     --about_pages "$ABOUT_PAGES_INPUT" \
+    --reclassifications "$PANETHNIC_RECLASS_OUT" \
     --irs_org_activities raw_data/irs_data/irs_org_activities.csv \
     --irs_nonweb_activities raw_data/irs_data/irs_nonweb_activities.csv \
     --predictions raw_data/web_data/predictions.csv \
