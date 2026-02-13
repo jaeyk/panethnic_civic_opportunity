@@ -178,22 +178,35 @@ Phase 06: Visualization and communication
   - gap-focused charts showing where population growth outpaces organization growth most strongly.
 - Deliverables:
   - publication-ready figures and a compact city-selection rationale appendix.
-- Script:
-  - `src/visualize_growth_gap.R` (R-based plotting workflow).
 
-Example (Phase 06 in R):
+Current focus figure scripts (kept):
+- `src/visualize_panethnic_trend_over_time.R`
+- `src/visualize_panethnic_share_by_category_decade_sizeaware.R`
+- `src/visualize_civic_opportunity_simple.R`
+- `src/visualize_civic_source_family_composition_by_scope_group.R`
+- `src/visualize_panethnic_county_growth_index_map.R`
 
-```bash
-Rscript src/visualize_growth_gap.R \
-  --org_enriched processed_data/org_enriched/org_civic_enriched.csv \
-  --population processed_data/population/population_series.csv \
-  --selected_places processed_data/gap_analysis/selected_places_from_gaps.csv \
-  --gap_scores processed_data/gap_analysis/place_gap_scores.csv \
-  --out_dir outputs/figures
-```
+Current focus figure outputs:
+- `outputs/figures/panethnic_trend_over_time.png`
+- `outputs/figures/panethnic_share_by_category_decade_sizeaware.png`
+- `outputs/figures/civic_opportunity_rate_by_group_scope.png`
+- `outputs/figures/civic_source_family_composition_by_scope_group.png`
+- `outputs/figures/panethnic_county_growth_index_map.png`
 
-Additional Phase 06 output:
-- `outputs/figures/urbanicity_gap_comparison.png`
+These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (directly or via derived analysis table) and reflect embedding-based constituency reclassification merged in Phase `02`.
+- county growth map population source/year:
+  - `processed_data/population/census_county_2020_b03002.json` (Census ACS 2020, county-level B03002)
+- county growth map normalization:
+  - compute county panethnic growth rate from cumulative organizations (`<= 1980` baseline vs `<= latest IRS incorporation year`),
+  - then normalize as `(growth_rate_pct / county_population_2020) * 100000`,
+  - quintile the normalized values to a 5-level index within each group (Asian/Latino),
+  - compute expected county panethnic count using group-level national rate per 100k (`expected = population_2020 * national_rate_per_100k / 100000`),
+  - counties are highlighted as a separate class when `expected >= 1` but observed panethnic count is `0`.
+- denominator note for organizational-type-by-decade visuals:
+  - total enriched orgs: `12,681`
+  - after figure base filters (`panethnic_group` in `asian/latino`, valid `fnd_yr`, non-`unknown` `org_type`): `9,688`
+  - plotted in `panethnic_share_by_category_decade` outputs after cell filter `org_n >= 5`: `9,564`
+  - excluded only by sparse cell rule (`n < 5`): `124`
 
 Phase 07 (deprecated / not in default pipeline): Supervised ML validation and filtering (ground truth + scraped text)
 - Goal: add a supervised validation gate so candidate organizations are retained only when model confidence supports Asian American or Latino classification.
@@ -313,6 +326,10 @@ python3 src/dedupe_about_pages.py \
 5. `02`: enrichment (`src/enrich_org_civic_type.R`) using `processed_data/org_matching/similar_org_candidates.csv`
 6. `03` + `04`: population fetch + gap selection (`src/fetch_population_series.py`, `src/select_gap_cases.R`)
 7. `05` + `06`: visualization + completion/shutdown behavior in runner
+
+Reclassification provenance note:
+- `src/enrich_org_civic_type.R` merges the `01d` output (`processed_data/org_matching/panethnic_constituency_reclass.csv`) into `processed_data/org_enriched/org_civic_enriched.csv` and updates `panethnic_group` for eligible `ethnic_named` organizations.
+- Downstream panethnic analyses and figures that read `processed_data/org_enriched/org_civic_enriched.csv` (including panethnic trend and organizational-type composition plots) therefore reflect the post reclassification labels, not pre-reclassification labels.
 
 Run-all script:
 
