@@ -209,11 +209,15 @@ These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (di
   - output figure: `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
   - metric:
     - uses yearly **new** panethnic incorporations (`fnd_yr`) from `1970` to `2020`,
-    - applies 5-year centered rolling average,
+    - applies 5-year centered rolling average with partial windows at edges,
     - normalizes by relevant-group county population before share conversion:
       - Asian org flow uses county Asian population (`P1_006N`),
       - Latino org flow uses county Latino population (`P2_002N`),
     - computes within-group shares by year (Asian sums to 100%; Latino sums to 100%).
+  - uncertainty:
+    - 95% confidence intervals shown as ribbons,
+    - CI method uses parametric bootstrap on yearly tier counts (`Poisson` draws), then applies the same normalization, rolling, and share transform,
+    - current default in script: `n_boot = 400`, `seed = 1234`.
   - tier definitions (relevant-group county population):
     - `Mega >= 1,000,000`
     - `Large 250,000-999,999`

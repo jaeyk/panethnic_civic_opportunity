@@ -15,7 +15,9 @@ cfg <- list(
   out_fig = "outputs/figures/panethnic_flow_share_by_county_size_tier.png",
   min_year = 1970L,
   max_year = 2020L,
-  roll_k = 5L
+  roll_k = 5L,
+  n_boot = 400L,
+  seed = 1234L
 )
 
 for (p in c(cfg$org_input, cfg$census_2020_json)) {
@@ -89,10 +91,41 @@ tier_pop <- pop_group[size_tier %in% tiers, .(
 ), by = .(panethnic_group, size_tier)]
 flow <- merge(flow, tier_pop, by = c("panethnic_group", "size_tier"), all.x = TRUE)
 flow[, flow_rate_per_100k := fifelse(tier_pop_2020 > 0, (new_org_n / tier_pop_2020) * 100000, NA_real_)]
-flow[, flow_rate_roll5 := zoo::rollmean(flow_rate_per_100k, k = cfg$roll_k, fill = NA, align = "center"), by = .(panethnic_group, size_tier)]
+flow[, flow_rate_roll5 := zoo::rollapply(
+  flow_rate_per_100k,
+  width = cfg$roll_k,
+  FUN = mean,
+  fill = NA,
+  align = "center",
+  partial = TRUE,
+  na.rm = TRUE
+), by = .(panethnic_group, size_tier)]
 flow[, total_rate_roll5 := sum(flow_rate_roll5, na.rm = TRUE), by = .(panethnic_group, fnd_yr)]
 flow[, flow_share_roll5 := fifelse(total_rate_roll5 > 0, 100 * flow_rate_roll5 / total_rate_roll5, NA_real_)]
 flow[, group_label := fifelse(panethnic_group == "asian", "Asian", "Latino")]
+
+# 95% CI via parametric bootstrap on yearly tier counts, then same rolling/share transform.
+set.seed(cfg$seed)
+boot_grid <- flow[, .(panethnic_group, size_tier, fnd_yr, new_org_n, tier_pop_2020)]
+boot_dt <- boot_grid[, .(rep = 1:cfg$n_boot), by = .(panethnic_group, size_tier, fnd_yr, new_org_n, tier_pop_2020)]
+boot_dt[, n_sim := rpois(.N, lambda = pmax(new_org_n, 0))]
+boot_dt[, rate_sim := fifelse(tier_pop_2020 > 0, (n_sim / tier_pop_2020) * 100000, NA_real_)]
+boot_dt[, rate_roll5 := zoo::rollapply(
+  rate_sim,
+  width = cfg$roll_k,
+  FUN = mean,
+  fill = NA,
+  align = "center",
+  partial = TRUE,
+  na.rm = TRUE
+), by = .(rep, panethnic_group, size_tier)]
+boot_dt[, total_rate_roll5 := sum(rate_roll5, na.rm = TRUE), by = .(rep, panethnic_group, fnd_yr)]
+boot_dt[, share_roll5 := fifelse(total_rate_roll5 > 0, 100 * rate_roll5 / total_rate_roll5, NA_real_)]
+ci_dt <- boot_dt[!is.na(share_roll5), .(
+  share_lo = as.numeric(quantile(share_roll5, probs = 0.025, na.rm = TRUE)),
+  share_hi = as.numeric(quantile(share_roll5, probs = 0.975, na.rm = TRUE))
+), by = .(panethnic_group, size_tier, fnd_yr)]
+flow <- merge(flow, ci_dt, by = c("panethnic_group", "size_tier", "fnd_yr"), all.x = TRUE)
 
 tier_labels <- c(
   mega_urban = "Mega urban (1M+)",
@@ -168,7 +201,6 @@ key_dt <- data.table(
   y = y_upper * 0.98,
   label = tier_key
 )
-flow[, is_highlight := size_tier_short %in% c("Mega", "Rural")]
 line_style_dt <- data.table(
   size_tier_label = factor(unname(tier_labels), levels = unname(tier_labels)),
   size_tier_short = c("Mega", "Large", "Mid", "Small", "Suburban", "Rural")
@@ -194,6 +226,13 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
     inherit.aes = FALSE,
     fill = "white",
     color = NA
+  ) +
+  geom_ribbon(
+    aes(ymin = share_lo, ymax = share_hi, fill = size_tier_label),
+    alpha = 0.12,
+    color = NA,
+    na.rm = TRUE,
+    show.legend = FALSE
   ) +
   geom_line(aes(color = line_color, linewidth = line_width), na.rm = TRUE, show.legend = FALSE) +
   geom_segment(
@@ -228,6 +267,7 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
     color = "black"
   ) +
   facet_wrap(~group_label, ncol = 1) +
+  scale_fill_grey(start = 0.05, end = 0.85) +
   scale_color_identity() +
   scale_linewidth_identity() +
   scale_linetype_manual(values = c("solid", "longdash", "dotdash", "twodash", "dashed", "dotted")) +
