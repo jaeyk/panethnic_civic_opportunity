@@ -218,6 +218,7 @@ These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (di
     - uses yearly **new** panethnic incorporations (`fnd_yr`) from `1970` to `2020`,
     - applies 5-year centered rolling average with partial windows at edges,
     - normalizes by relevant-group county population before share conversion:
+      - county total population source for tiering: `P1_001N` (Census 2020 PL),
       - Asian org flow uses county Asian population (`P1_006N`),
       - Latino org flow uses county Latino population (`P2_002N`),
     - computes within-group shares by year (Asian sums to 100%; Latino sums to 100%).
@@ -226,13 +227,17 @@ These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (di
     - CI ribbons are optional in plotting (`show_ci` in script; default is `FALSE` for the cleaner line-focused figure),
     - CI method uses parametric bootstrap on yearly tier counts (`Poisson` draws), then applies the same normalization, rolling, and share transform,
     - current default in script: `n_boot = 400`, `seed = 1234`.
-  - tier definitions (relevant-group county population):
+  - tier definitions (hybrid: size + county context):
     - `Mega >= 1,000,000`
     - `Large 250,000-999,999`
     - `Mid 100,000-249,999`
     - `Small 50,000-99,999`
-    - `Suburban 10,000-49,999`
-    - `Rural < 10,000`
+    - for counties with relevant-group population `< 50,000`:
+      - `Suburban`: RUCC metro/adjacent (`1, 2, 3, 4, 6, 8`)
+      - `Rural`: RUCC non-adjacent (`5, 7, 9`)
+  - RUCC source:
+    - USDA ERS county classification file: `raw_data/County_Classifications.csv`
+    - field used: `RuralUrbanContinuumCode2013`
   - final plotting choices:
     - grayscale high-contrast lines + distinct linetypes,
     - right-side direct labels (text-first, no marker stubs),

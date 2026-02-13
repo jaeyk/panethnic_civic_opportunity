@@ -10,7 +10,8 @@ suppressPackageStartupMessages({
 
 cfg <- list(
   org_input = "processed_data/org_enriched/org_civic_enriched.csv",
-  census_2020_json = "processed_data/population/census_county_2020_pl_asian_latino.json",
+  census_2020_json = "processed_data/population/census_county_2020_pl_total_asian_latino.json",
+  rucc_csv = "raw_data/County_Classifications.csv",
   out_table = "outputs/analysis/panethnic_flow_share_by_county_size_tier_year.csv",
   out_fig = "outputs/figures/panethnic_flow_share_by_county_size_tier.png",
   min_year = 1970L,
@@ -21,38 +22,52 @@ cfg <- list(
   show_ci = FALSE
 )
 
-for (p in c(cfg$org_input, cfg$census_2020_json)) {
+for (p in c(cfg$org_input, cfg$census_2020_json, cfg$rucc_csv)) {
   if (!file.exists(p)) stop(sprintf("Missing required file: %s", p))
 }
 dir.create(dirname(cfg$out_table), recursive = TRUE, showWarnings = FALSE)
 dir.create(dirname(cfg$out_fig), recursive = TRUE, showWarnings = FALSE)
 
-county_size_tier <- function(pop_total) {
-  out <- rep("unknown", length(pop_total))
-  out[!is.na(pop_total) & pop_total >= 1000000] <- "mega_urban"
-  out[!is.na(pop_total) & pop_total >= 250000 & pop_total < 1000000] <- "large_urban"
-  out[!is.na(pop_total) & pop_total >= 100000 & pop_total < 250000] <- "mid_urban"
-  out[!is.na(pop_total) & pop_total >= 50000 & pop_total < 100000] <- "small_urban"
-  out[!is.na(pop_total) & pop_total >= 10000 & pop_total < 50000] <- "suburban"
-  out[!is.na(pop_total) & pop_total < 10000] <- "rural"
-  out
-}
-
 raw <- fromJSON(cfg$census_2020_json)
 hdr <- as.character(raw[1, ])
 pop <- as.data.table(raw[-1, , drop = FALSE])
 setnames(pop, hdr)
-if (!all(c("state", "county", "P1_006N", "P2_002N") %in% names(pop))) {
-  stop("Census file must include state, county, P1_006N (Asian), and P2_002N (Latino).")
+if (!all(c("state", "county", "P1_001N", "P1_006N", "P2_002N") %in% names(pop))) {
+  stop("Census file must include state, county, P1_001N, P1_006N (Asian), and P2_002N (Latino).")
 }
 pop[, county_fips := sprintf("%02d%03d", as.integer(state), as.integer(county))]
 pop <- pop[county_fips != "00000"]
+pop[, total_pop_2020 := suppressWarnings(as.integer(P1_001N))]
 pop_group <- rbindlist(list(
   pop[, .(county_fips, panethnic_group = "asian", group_pop_2020 = suppressWarnings(as.integer(P1_006N)))],
   pop[, .(county_fips, panethnic_group = "latino", group_pop_2020 = suppressWarnings(as.integer(P2_002N)))]
 ), use.names = TRUE, fill = TRUE)
 pop_group <- pop_group[!is.na(group_pop_2020) & group_pop_2020 >= 0]
-pop_group[, size_tier := county_size_tier(group_pop_2020)]
+
+rucc <- fread(cfg$rucc_csv, encoding = "UTF-8")
+need_rucc <- c("FIPStxt", "RuralUrbanContinuumCode2013")
+miss_rucc <- need_rucc[!need_rucc %in% names(rucc)]
+if (length(miss_rucc) > 0L) stop(sprintf("Missing RUCC columns: %s", paste(miss_rucc, collapse = ", ")))
+rucc <- unique(rucc[, .(
+  county_fips = sprintf("%05d", suppressWarnings(as.integer(FIPStxt))),
+  rucc_code = suppressWarnings(as.integer(RuralUrbanContinuumCode2013))
+)])
+rucc <- rucc[!is.na(county_fips) & county_fips != "00000" & rucc_code %in% 1:9]
+pop_group <- merge(pop_group, pop[, .(county_fips, total_pop_2020)], by = "county_fips", all.x = FALSE)
+pop_group <- merge(pop_group, rucc[, .(county_fips, rucc_code)], by = "county_fips", all.x = FALSE)
+
+county_size_tier <- function(group_pop, rucc_code) {
+  out <- rep("unknown", length(group_pop))
+  out[!is.na(group_pop) & group_pop >= 1000000] <- "mega_urban"
+  out[!is.na(group_pop) & group_pop >= 250000 & group_pop < 1000000] <- "large_urban"
+  out[!is.na(group_pop) & group_pop >= 100000 & group_pop < 250000] <- "mid_urban"
+  out[!is.na(group_pop) & group_pop >= 50000 & group_pop < 100000] <- "small_urban"
+  # For low-pop counties, use RUCC adjacency to avoid size-only "suburban" labeling.
+  out[!is.na(group_pop) & group_pop < 50000 & rucc_code %in% c(1L, 2L, 3L, 4L, 6L, 8L)] <- "suburban"
+  out[!is.na(group_pop) & group_pop < 50000 & rucc_code %in% c(5L, 7L, 9L)] <- "rural"
+  out
+}
+pop_group[, size_tier := county_size_tier(group_pop_2020, rucc_code)]
 
 org <- fread(cfg$org_input, encoding = "UTF-8")
 need <- c("ein", "fnd_yr", "panethnic_group", "candidate_type", "reclass_applied", "irs_county_fips")
@@ -133,8 +148,8 @@ tier_labels <- c(
   large_urban = "Large urban (250k-999k)",
   mid_urban = "Mid urban (100k-249k)",
   small_urban = "Small urban (50k-99k)",
-  suburban = "Suburban (10k-49k)",
-  rural = "Rural (<10k)"
+  suburban = "Suburban (size + RUCC-adj)",
+  rural = "Rural (size + RUCC-remote)"
 )
 flow[, size_tier_label := factor(tier_labels[size_tier], levels = unname(tier_labels))]
 flow[, size_tier_short := fifelse(
@@ -187,13 +202,13 @@ if (!is.finite(y_max)) y_max <- 100
 y_upper <- max(20, min(100, ceiling((y_max * 1.12) / 5) * 5))
 
 tier_key <- paste(
-  "Tier key (relevant-group county population):",
-  "Mega: >= 1,000,000",
+  "Tier key (hybrid):",
+  "Mega: relevant-group pop >= 1,000,000",
   "Large: 250,000-999,999",
   "Mid: 100,000-249,999",
   "Small: 50,000-99,999",
-  "Suburban: 10,000-49,999",
-  "Rural: < 10,000",
+  "Suburban: <50,000 and RUCC metro/adjacent",
+  "Rural: <50,000 and RUCC non-adjacent",
   sep = "\n"
 )
 key_dt <- data.table(
@@ -259,7 +274,7 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
   coord_cartesian(clip = "off") +
   labs(
     title = "Share of New Panethnic Incorporations by County Size Tier",
-    subtitle = "Population-adjusted using relevant-group county population\n(Asian for Asian orgs, Latino for Latino orgs); within-group shares, 5-year centered average",
+    subtitle = "Hybrid tiers: mega/large/mid/small by relevant-group county population,\nsuburban/rural split by RUCC adjacency; within-group shares, 5-year centered average",
     x = "IRS incorporation year",
     y = "Share of new panethnic incorporations (%)",
     color = NULL,
