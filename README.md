@@ -196,6 +196,13 @@ Current focus figure outputs:
 - `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
 
 These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (directly or via derived analysis table) and reflect embedding-based constituency reclassification merged in Phase `02`.
+- panethnic trend over incorporation cohorts:
+  - script: `src/visualize_panethnic_trend_over_time.R`
+  - output table: `outputs/analysis/panethnic_trend_yearly.csv`
+  - output figure: `outputs/figures/panethnic_trend_over_time.png`
+  - plotting default:
+    - line/point trend view with no CI ribbons (`show_ci = FALSE`),
+    - optional CI ribbons can be enabled by setting `show_ci = TRUE` in the script.
 - county growth index map (restored final version):
   - script: `src/visualize_panethnic_county_growth_index_map.R`
   - output table: `outputs/analysis/panethnic_county_growth_index.csv`
