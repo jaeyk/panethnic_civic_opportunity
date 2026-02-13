@@ -185,6 +185,7 @@ Current focus figure scripts (kept):
 - `src/visualize_civic_opportunity_simple.R`
 - `src/visualize_civic_source_family_composition_by_scope_group.R`
 - `src/visualize_panethnic_county_growth_index_map.R`
+- `src/visualize_panethnic_flow_share_by_county_size_tier.R`
 
 Current focus figure outputs:
 - `outputs/figures/panethnic_trend_over_time.png`
@@ -192,16 +193,47 @@ Current focus figure outputs:
 - `outputs/figures/civic_opportunity_rate_by_group_scope.png`
 - `outputs/figures/civic_source_family_composition_by_scope_group.png`
 - `outputs/figures/panethnic_county_growth_index_map.png`
+- `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
 
 These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (directly or via derived analysis table) and reflect embedding-based constituency reclassification merged in Phase `02`.
-- county growth map population source/year:
-  - `processed_data/population/census_county_2020_b03002.json` (Census ACS 2020, county-level B03002)
-- county growth map normalization:
-  - compute county panethnic growth rate from cumulative organizations (`<= 1980` baseline vs `<= latest IRS incorporation year`),
-  - then normalize as `(growth_rate_pct / county_population_2020) * 100000`,
-  - quintile the normalized values to a 5-level index within each group (Asian/Latino),
-  - compute expected county panethnic count using group-level national rate per 100k (`expected = population_2020 * national_rate_per_100k / 100000`),
-  - counties are highlighted as a separate class when `expected >= 1` but observed panethnic count is `0`.
+- county growth index map (restored final version):
+  - script: `src/visualize_panethnic_county_growth_index_map.R`
+  - output table: `outputs/analysis/panethnic_county_growth_index.csv`
+  - output figure: `outputs/figures/panethnic_county_growth_index_map.png`
+  - map classes:
+    - green classes `1-5`: county growth index quintiles within group,
+    - red class: `No panethnic orgs (population suggests presence)`.
+- county size-tier flow-share figure (new-incorporation dynamics):
+  - script: `src/visualize_panethnic_flow_share_by_county_size_tier.R`
+  - output table: `outputs/analysis/panethnic_flow_share_by_county_size_tier_year.csv`
+  - output figure: `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
+  - metric:
+    - uses yearly **new** panethnic incorporations (`fnd_yr`) from `1970` to `2020`,
+    - applies 5-year centered rolling average,
+    - normalizes by relevant-group county population before share conversion:
+      - Asian org flow uses county Asian population (`P1_006N`),
+      - Latino org flow uses county Latino population (`P2_002N`),
+    - computes within-group shares by year (Asian sums to 100%; Latino sums to 100%).
+  - tier definitions (relevant-group county population):
+    - `Mega >= 1,000,000`
+    - `Large 250,000-999,999`
+    - `Mid 100,000-249,999`
+    - `Small 50,000-99,999`
+    - `Suburban 10,000-49,999`
+    - `Rural < 10,000`
+  - final plotting choices:
+    - grayscale high-contrast lines + distinct linetypes,
+    - right-side direct labels (text-first, no marker stubs),
+    - `Mega` and `Small` emphasized in line/label contrast,
+    - white label lane for annotation readability.
+- county type profiling for no-panethnic counties:
+  - script: `src/analyze_county_urbanicity_no_panethnic.R`
+  - input counties: `outputs/analysis/county_asian_population_no_panethnic_2020.csv`, `outputs/analysis/county_latino_population_no_panethnic_2020.csv`
+  - total population source: `processed_data/population/census_county_2020_pl_total_asian_latino.json` (Census 2020 PL, county)
+  - urbanicity rule: `urban >= 50,000`, `suburban 10,000-49,999`, `rural < 10,000` (county total population)
+  - outputs:
+    - `outputs/analysis/county_no_panethnic_urbanicity_2020.csv`
+    - `outputs/analysis/county_no_panethnic_urbanicity_summary_2020.csv`
 - denominator note for organizational-type-by-decade visuals:
   - total enriched orgs: `12,681`
   - after figure base filters (`panethnic_group` in `asian/latino`, valid `fnd_yr`, non-`unknown` `org_type`): `9,688`
