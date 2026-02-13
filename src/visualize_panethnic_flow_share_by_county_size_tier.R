@@ -17,7 +17,8 @@ cfg <- list(
   max_year = 2020L,
   roll_k = 5L,
   n_boot = 400L,
-  seed = 1234L
+  seed = 1234L,
+  show_ci = FALSE
 )
 
 for (p in c(cfg$org_input, cfg$census_2020_json)) {
@@ -220,20 +221,6 @@ label_bg_dt <- data.table(
 )
 
 p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_label)) +
-  geom_rect(
-    data = label_bg_dt,
-    aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-    inherit.aes = FALSE,
-    fill = "white",
-    color = NA
-  ) +
-  geom_ribbon(
-    aes(ymin = share_lo, ymax = share_hi, fill = size_tier_label),
-    alpha = 0.12,
-    color = NA,
-    na.rm = TRUE,
-    show.legend = FALSE
-  ) +
   geom_line(aes(color = line_color, linewidth = line_width), na.rm = TRUE, show.legend = FALSE) +
   geom_segment(
     data = label_dt,
@@ -242,17 +229,14 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
     color = "grey65",
     linewidth = 0.25
   ) +
-  geom_label(
+  geom_text(
     data = label_dt,
     aes(x = x_label, y = y_label, label = size_tier_short),
     inherit.aes = FALSE,
     hjust = 0,
     size = label_dt$label_size,
     fontface = label_dt$label_fontface,
-    color = label_dt$label_text_color,
-    fill = label_dt$label_fill,
-    linewidth = 0,
-    label.padding = unit(0.04, "lines")
+    color = label_dt$label_text_color
   ) +
   geom_label(
     data = key_dt,
@@ -267,7 +251,6 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
     color = "black"
   ) +
   facet_wrap(~group_label, ncol = 1) +
-  scale_fill_grey(start = 0.05, end = 0.85) +
   scale_color_identity() +
   scale_linewidth_identity() +
   scale_linetype_manual(values = c("solid", "longdash", "dotdash", "twodash", "dashed", "dotted")) +
@@ -293,6 +276,17 @@ p <- ggplot(flow, aes(x = fnd_yr, y = flow_share_roll5, linetype = size_tier_lab
     legend.position = "none",
     plot.margin = margin(10, 70, 10, 10)
   )
+
+if (isTRUE(cfg$show_ci)) {
+  p <- p + geom_ribbon(
+    aes(ymin = share_lo, ymax = share_hi, fill = size_tier_label),
+    alpha = 0.12,
+    color = NA,
+    na.rm = TRUE,
+    show.legend = FALSE
+  ) +
+    scale_fill_grey(start = 0.05, end = 0.85)
+}
 
 ggsave(cfg$out_fig, p, width = 12, height = 9, dpi = 220)
 cat(sprintf("Wrote table: %s\n", cfg$out_table))

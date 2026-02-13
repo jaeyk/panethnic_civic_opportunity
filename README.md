@@ -215,7 +215,8 @@ These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (di
       - Latino org flow uses county Latino population (`P2_002N`),
     - computes within-group shares by year (Asian sums to 100%; Latino sums to 100%).
   - uncertainty:
-    - 95% confidence intervals shown as ribbons,
+    - bootstrap confidence intervals are computed and written to the output table (`share_lo`, `share_hi`),
+    - CI ribbons are optional in plotting (`show_ci` in script; default is `FALSE` for the cleaner line-focused figure),
     - CI method uses parametric bootstrap on yearly tier counts (`Poisson` draws), then applies the same normalization, rolling, and share transform,
     - current default in script: `n_boot = 400`, `seed = 1234`.
   - tier definitions (relevant-group county population):
@@ -229,7 +230,7 @@ These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (di
     - grayscale high-contrast lines + distinct linetypes,
     - right-side direct labels (text-first, no marker stubs),
     - `Mega` and `Small` emphasized in line/label contrast,
-    - white label lane for annotation readability.
+    - compact tier-key box in the top-right of the Asian panel.
 - county type profiling for no-panethnic counties:
   - script: `src/analyze_county_urbanicity_no_panethnic.R`
   - input counties: `outputs/analysis/county_asian_population_no_panethnic_2020.csv`, `outputs/analysis/county_latino_population_no_panethnic_2020.csv`
