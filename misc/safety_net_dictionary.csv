@@ -5,6 +5,7 @@ SNAP,food stamps,,legacy/common reference
 SNAP,calfresh,CA,California SNAP brand
 SNAP,lone star card,TX,Texas EBT/SNAP reference
 SNAP,link card,IL,Illinois SNAP/EBT reference
+SNAP,foodshare,WI,Wisconsin SNAP brand
 SNAP,ebt,,generic card reference
 WIC,wic,,federal acronym
 WIC,women infants and children,,federal long name
@@ -18,9 +19,13 @@ Medicaid,masshealth,MA,Massachusetts Medicaid
 Medicaid,tenncare,TN,Tennessee Medicaid
 Medicaid,ahcccs,AZ,Arizona Medicaid
 Medicaid,husky health,CT,Connecticut Medicaid
+Medicaid,med-quest,HI,Hawaii Medicaid program name
+Medicaid,quest integration,HI,Hawaii Medicaid managed care branding
 CHIP,chip,,Children's Health Insurance Program
 CHIP,children s health insurance program,,formal name
 CHIP,all kids,IL,Illinois CHIP-related branding
+CHIP,hawk-i,IA,Iowa CHIP program name
+CHIP,peachcare for kids,GA,Georgia CHIP program name
 Cash Assistance,tanf,,federal acronym
 Cash Assistance,temporary assistance for needy families,,federal long name
 Cash Assistance,cash assistance,,generic program wording
@@ -35,7 +40,83 @@ Senior Care,in-home care,,generic wording
 Senior Care,caregiver support,,generic wording
 Senior Care,long term care,,generic wording
 Utility Assistance,liheap,,Low Income Home Energy Assistance Program
+Utility Assistance,lieap,,common misspelling/variant of LIHEAP
 Utility Assistance,low income home energy assistance program,,formal name
 Utility Assistance,utility assistance,,generic wording
+Utility Assistance,heap,NY,New York Home Energy Assistance Program acronym
 Nutrition Assistance,food pantry,,related safety-net service
 Nutrition Assistance,meal assistance,,related safety-net service
+Social Security,social security retirement benefits,,USA.gov Social Security benefits page
+Social Security,social security benefits,,USA.gov Social Security benefits page
+Social Security,social security survivor benefits,,USA.gov Social Security benefits page
+Social Security,survivor benefits,,USA.gov Social Security benefits page
+SSDI,ssdi,,USA.gov SSDI page acronym
+SSDI,social security disability insurance,,USA.gov SSDI page long name
+SSDI,disability insurance benefits,,USA.gov SSDI page wording
+SSI,ssi,,USA.gov SSI page acronym
+SSI,supplemental security income,,USA.gov SSI page long name
+SSI,supplemental security income program,,SSA/USA.gov wording
+Unemployment Insurance,unemployment insurance,,USA.gov unemployment benefits page
+Unemployment Insurance,unemployment benefits,,USA.gov unemployment benefits page
+Unemployment Insurance,file for unemployment,,USA.gov unemployment benefits page
+Tax Credits,earned income tax credit,,USA.gov EITC page
+Tax Credits,eitc,,USA.gov EITC acronym
+Tax Credits,child tax credit,,USA.gov CTC page
+Tax Credits,credit for other dependents,,USA.gov CTC page
+Tax Credits,child and dependent care tax credit,,USA.gov tax credits page
+Early Childhood Assistance,head start,,federal early childhood assistance program
+Early Childhood Assistance,early head start,,federal early childhood assistance program
+Early Childhood Assistance,head start program,,common program wording
+Early Childhood Assistance,early head start program,,common program wording
+Medicare,medicare,,federal health insurance program
+Medicare,medicare part a,,hospital insurance component
+Medicare,medicare part b,,medical insurance component
+Medicare,medicare part d,,prescription drug component
+Education Assistance,pell grant,,federal higher education grant
+Education Assistance,pell grants,,federal higher education grant
+Education Assistance,federal pell grant,,federal higher education grant
+Child Nutrition,free school lunch,,child nutrition assistance program
+Child Nutrition,reduced-price school lunch,,child nutrition assistance program
+Child Nutrition,school breakfast program,,child nutrition assistance program
+Child Nutrition,summer food service program,,child nutrition assistance program
+Child Care Assistance,child care and development fund,,federal child care block grant
+Child Care Assistance,ccdf,,federal child care block grant acronym
+Child Care Assistance,ccap,,common acronym for child care assistance program
+Child Care Assistance,child care assistance program,,common full name for CCAP
+Child Care Assistance,child care assistance,,generic child care aid wording
+Job Training,workforce innovation and opportunity act,,federal workforce program
+Job Training,wioa,,federal workforce program acronym
+Job Training,job training program,,generic workforce aid wording
+Telecom Assistance,lifeline,,federal discounted telecom program
+Telecom Assistance,lifeline program,,federal discounted telecom program
+Mental Health Assistance,mental health services,,core behavioral health support wording
+Mental Health Assistance,behavioral health services,,core behavioral health support wording
+Mental Health Assistance,community mental health,,public/community mental health service wording
+Mental Health Assistance,community mental health services,,public/community mental health service wording
+Mental Health Assistance,counseling services,,common outpatient mental health support wording
+Mental Health Assistance,substance use treatment,,public behavioral health treatment wording
+Mental Health Assistance,substance abuse treatment,,legacy behavioral health treatment wording
+Mental Health Assistance,988,,Suicide & Crisis Lifeline short code
+Mental Health Assistance,988 lifeline,,Suicide & Crisis Lifeline naming
+Mental Health Assistance,suicide and crisis lifeline,,federal crisis line naming
+Mental Health Assistance,crisis counseling,,public mental health crisis support
+Mental Health Assistance,mobile crisis,,public behavioral health crisis response
+Mental Health Assistance,certified community behavioral health clinic,,CCBHC model wording
+Mental Health Assistance,ccbhc,,Certified Community Behavioral Health Clinic acronym
+Mental Health Assistance,samhsa,,Substance Abuse and Mental Health Services Administration acronym
+Community Development,community development,,core neighborhood/community development wording
+Community Development,community economic development,,community-based economic development wording
+Community Development,cdc,,common acronym for community development corporation
+Community Development,community development corporation,,common organization/program wording
+Community Development,cdbg,,Community Development Block Grant acronym
+Community Development,community development block grant,,HUD CDBG full name
+Community Development,neighborhood revitalization,,common community development intervention wording
+Community Development,affordable housing development,,community development and housing production wording
+Legal Access,legal aid,,core civil legal support wording
+Legal Access,legal services,,civil legal support wording
+Legal Access,legal assistance,,civil legal support wording
+Legal Access,civil legal aid,,civil legal aid specific wording
+Legal Access,access to justice,,legal access framework wording
+Legal Access,know your rights legal clinic,,common legal access clinic wording
+Legal Access,immigration legal services,,common legal access service area wording
+Legal Access,eviction defense,,housing-related legal access support wording

@@ -15,7 +15,8 @@ parse_args <- function(args) {
     retries = 2L,
     retry_wait_sec = 2L,
     min_request_sec = 0L,
-    early_fail_check_n = 50L
+    early_fail_check_n = 50L,
+    workers = 1L
   )
   if (length(args) == 0) return(cfg)
   i <- 1L
@@ -23,7 +24,7 @@ parse_args <- function(args) {
     key <- sub("^--", "", args[[i]])
     val <- args[[i + 1L]]
     if (key %in% c("candidates", "out_file")) cfg[[key]] <- val
-    else if (key %in% c("start_index", "end_index", "batch_size", "timeout_thres", "retries", "retry_wait_sec", "min_request_sec", "early_fail_check_n")) cfg[[key]] <- as.integer(val)
+    else if (key %in% c("start_index", "end_index", "batch_size", "timeout_thres", "retries", "retry_wait_sec", "min_request_sec", "early_fail_check_n", "workers")) cfg[[key]] <- as.integer(val)
     else if (key == "overwrite") cfg[[key]] <- tolower(val) %in% c("1","true","t","yes","y")
     else stop(sprintf("Unknown argument: --%s", key))
     i <- i + 2L
@@ -87,6 +88,7 @@ shorten <- function(x, n = 80L) {
 
 main <- function() {
   cfg <- parse_args(commandArgs(trailingOnly = TRUE))
+  cfg$workers <- max(1L, as.integer(cfg$workers))
   dir.create(dirname(cfg$out_file), recursive = TRUE, showWarnings = FALSE)
 
   cand <- fread(cfg$candidates, encoding = "UTF-8")
@@ -134,11 +136,12 @@ main <- function() {
     req_sec <- numeric(nrow(part))
     tries <- integer(nrow(part))
 
-    for (j in seq_len(nrow(part))) {
-      ein_j <- part$ein[[j]]
-      org_j <- shorten(part$irs_name_raw[[j]], 90L)
-      url_j <- shorten(part$preferred_link[[j]], 100L)
-      message(sprintf("Scraping [%s/%s] EIN=%s | %s | %s", completed + 1L, n, ein_j, org_j, url_j))
+    message(sprintf(
+      "Starting batch %s/%s (rows %s-%s) with workers=%s",
+      k, length(chunks), min(idx), max(idx), cfg$workers
+    ))
+
+    scrape_one <- function(j) {
       res <- safe_get_about(
         part$preferred_link[[j]],
         timeout_thres = cfg$timeout_thres,
@@ -146,6 +149,27 @@ main <- function() {
         retry_wait_sec = cfg$retry_wait_sec,
         min_request_sec = cfg$min_request_sec
       )
+      list(
+        j = j,
+        ein = part$ein[[j]],
+        org = shorten(part$irs_name_raw[[j]], 90L),
+        url = shorten(part$preferred_link[[j]], 100L),
+        res = res
+      )
+    }
+
+    batch_results <- if (cfg$workers > 1L && .Platform$OS.type == "unix") {
+      parallel::mclapply(seq_len(nrow(part)), scrape_one, mc.cores = cfg$workers)
+    } else {
+      if (cfg$workers > 1L && .Platform$OS.type != "unix") {
+        message("workers>1 requested but parallel forking is unavailable on this platform; falling back to workers=1")
+      }
+      lapply(seq_len(nrow(part)), scrape_one)
+    }
+
+    for (item in batch_results) {
+      j <- item$j
+      res <- item$res
       scraped[[j]] <- res$about_page_text
       statuses[[j]] <- res$scrape_status
       req_sec[[j]] <- res$request_sec
@@ -157,6 +181,10 @@ main <- function() {
       else if (res$scrape_status == "no_about") no_about_total <- no_about_total + 1L
       else err_total <- err_total + 1L
 
+      message(sprintf(
+        "Scraped [%s/%s] EIN=%s | %s | %s",
+        completed, n, item$ein, item$org, item$url
+      ))
       message(sprintf(
         "  status=%s | req=%.1fs | ok=%s err=%s no_about=%s",
         res$scrape_status, res$request_sec,
