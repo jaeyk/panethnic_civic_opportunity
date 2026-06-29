@@ -176,7 +176,7 @@ p_combined <- p_dumb + p_civ +
   plot_layout(widths = c(1.6, 1)) +
   plot_annotation(
     title    = "Panethnic organizations and civic opportunity are more urban than the populations they serve",
-    subtitle = "Panethnic Asian American and Latino organizations only; 2020 Census population",
+    subtitle = "Panethnic Asian American and Latino organizations only",
     caption  = paste0(
       "Urbanicity defined by USDA Rural-Urban Continuum Codes (RUCC 2013): ",
       "Urban = RUCC 1 (large metro); Suburban = RUCC 2–3 (smaller metro); Rural = RUCC 4–9 (non-metro).\n",
