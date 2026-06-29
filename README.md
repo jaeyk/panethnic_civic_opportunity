@@ -37,7 +37,25 @@ To validate and expand classifications beyond naming rules, we scrape the about-
 
 We validate panethnic classifications using two supervised machine learning tasks trained on the ground-truth set. A group classifier (XGBoost, 5-fold CV accuracy: 96.5%, AUC: 0.996) distinguishes Asian American from Latino organizations across the full candidate set. A panethnic-vs-ethnic classifier (ensemble of lasso, random forest, and XGBoost; 5-fold CV accuracy: 96.6%, AUC: 0.992) distinguishes panethnic organizations from unconfirmed ethnic-named candidates. Organizational types are assigned using a rule-based classifier applied to IRS name tokens and activity codes, producing 15 categories (civic/political, religious, professional, economic, arts and cultural, community, healthcare, housing, education, research, foundations, hobby and sports, social and fraternal, youth, unions); classifier accuracy is 97.6% (macro-F1: 98.6%) against a held-out ground-truth set.
 
-The alluvial flow figure compares the organizational type composition of panethnic organizations — those identified through direct naming, constituency reclassification, or ground-truth matching — across two eras defined by IRS incorporation year: the 1960s–1970s (n = 131 Asian American; n = 175 Latino) and Post-1981 (n = 864 Asian American; n = 1,269 Latino). For each group, we compute the proportion of organizations in each type within each period and render the shifts as sigmoid Bézier ribbons. Types that declined in share after 1981 are stacked at the top of each bar (dark grey) and types that increased are stacked at the bottom (light grey), allowing the aggregate recomposition to be read directly from the area of each shaded region.
+**Figure 1 — Org-type composition flow (`orgtype_flow_great_society_vs_reagan.png`)** compares the organizational type composition of panethnic organizations across two eras defined by IRS incorporation year: the 1960s–1970s (n = 131 Asian American; n = 175 Latino) and Post-1981 (n = 864 Asian American; n = 1,269 Latino). For each group, we compute the proportion of organizations in each type within each period and render the shifts as sigmoid Bézier ribbons. Types that declined in share after 1981 are stacked at the top of each bar (dark grey) and types that increased are stacked at the bottom (light grey), allowing the aggregate recomposition to be read directly from the area of each shaded region.
+
+**Figure 2 — Population vs. organizational presence by urbanicity (`population_org_urbanicity_mismatch.png`)** shows the mismatch between where the Asian American and Latino populations live and where panethnic organizations and civic opportunity are concentrated. For each group, we compare the population share by urbanicity tier (2020 Census county-level counts joined to USDA Rural-Urban Continuum Codes) against the organizational share by urbanicity tier (from `org_civic_enriched.csv`). Urbanicity is defined as: Urban (RUCC 1), Suburban (RUCC 2–3), and Rural (RUCC 4–9), consistent with the classification in `org_civic_enriched.csv`. A civic opportunity index — the average of four binary indicators (membership, volunteering, events, and civic and political action) from IRS activity records — is shown alongside to indicate the quality of civic infrastructure available by place type.
+
+  **Asian American** (n orgs: Urban 1,094; Suburban 134; Rural 20):
+
+  | Urbanicity | Population share | Org share | Civic opp. index |
+  | --- | ---: | ---: | ---: |
+  | Urban    | 80.1% | 87.7% | 0.31 |
+  | Suburban | 17.6% | 10.7% | 0.25 |
+  | Rural    |  2.2% |  1.6% | 0.11 |
+
+  **Latino** (n orgs: Urban 1,454; Suburban 478; Rural 73):
+
+  | Urbanicity | Population share | Org share | Civic opp. index |
+  | --- | ---: | ---: | ---: |
+  | Urban    | 66.4% | 72.5% | 0.24 |
+  | Suburban | 27.1% | 23.8% | 0.24 |
+  | Rural    |  6.6% |  3.6% | 0.14 |
 
 ## Org identification strategy
 
@@ -321,86 +339,22 @@ Phase 06: Visualization and communication
     | Foundations | 1.1% | 2.2% | +1.1 |
     | Research | 0.0% | 1.0% | +1.0 |
 
-Current focus figure scripts (kept):
+Current focus figures:
 
-- `src/visualize_panethnic_trend_over_time.R`
-- `src/visualize_panethnic_share_by_category_decade_sizeaware.R`
-- `src/visualize_civic_opportunity_simple.R`
-- `src/visualize_civic_source_family_composition_by_scope_group.R`
-- `src/visualize_panethnic_county_growth_index_map.R`
-- `src/visualize_panethnic_flow_share_by_county_size_tier.R`
+- **Org-type composition flow (1960s–70s vs. Post-1981)**
+  - script: `src/visualize_orgtype_flow_by_era.R`
+  - output figure: `outputs/figures/orgtype_flow_great_society_vs_reagan.png`
+  - output table: `outputs/analysis/orgtype_flow_great_society_vs_reagan.csv`
+  - scope: panethnic orgs only; periods defined by IRS incorporation year (`fnd_yr`)
+  - design: alluvial flow with decreasing types (dark grey) stacked at top, increasing (light grey) at bottom; black separator lines between flows
 
-Current focus figure outputs:
-
-- `outputs/figures/panethnic_trend_over_time.png`
-- `outputs/figures/panethnic_share_by_category_decade_sizeaware.png`
-- `outputs/figures/civic_opportunity_rate_by_group_scope.png`
-- `outputs/figures/civic_source_family_composition_by_scope_group.png`
-- `outputs/figures/panethnic_county_growth_index_map.png`
-- `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
-
-These scripts read from `processed_data/org_enriched/org_civic_enriched.csv` (directly or via derived analysis table) and reflect embedding-based constituency reclassification merged in Phase `02`.
-
-- panethnic trend over incorporation cohorts:
-  - script: `src/visualize_panethnic_trend_over_time.R`
-  - output table: `outputs/analysis/panethnic_trend_yearly.csv`
-  - output figure: `outputs/figures/panethnic_trend_over_time.png`
-  - plotting default:
-    - line/point trend view with no CI ribbons (`show_ci = FALSE`),
-    - optional CI ribbons can be enabled by setting `show_ci = TRUE` in the script.
-- county growth index map (restored final version):
-  - script: `src/visualize_panethnic_county_growth_index_map.R`
-  - output table: `outputs/analysis/panethnic_county_growth_index.csv`
-  - output figure: `outputs/figures/panethnic_county_growth_index_map.png`
-  - map classes:
-    - green classes `1-5`: county growth index quintiles within group,
-    - red class: `No panethnic orgs (population suggests presence)`.
-- county size-tier flow-share figure (new-incorporation dynamics):
-  - script: `src/visualize_panethnic_flow_share_by_county_size_tier.R`
-  - output table: `outputs/analysis/panethnic_flow_share_by_county_size_tier_year.csv`
-  - output figure: `outputs/figures/panethnic_flow_share_by_county_size_tier.png`
-  - metric:
-    - uses yearly **new** panethnic incorporations (`fnd_yr`) from `1970` to `2020`,
-    - applies 5-year centered rolling average with partial windows at edges,
-    - normalizes by relevant-group county population before share conversion:
-      - county total population source for tiering: `P1_001N` (Census 2020 PL),
-      - Asian org flow uses county Asian population (`P1_006N`),
-      - Latino org flow uses county Latino population (`P2_002N`),
-    - computes within-group shares by year (Asian sums to 100%; Latino sums to 100%).
-  - uncertainty:
-    - bootstrap confidence intervals are computed and written to the output table (`share_lo`, `share_hi`),
-    - CI ribbons are optional in plotting (`show_ci` in script; default is `FALSE` for the cleaner line-focused figure),
-    - CI method uses parametric bootstrap on yearly tier counts (`Poisson` draws), then applies the same normalization, rolling, and share transform,
-    - current default in script: `n_boot = 400`, `seed = 1234`.
-  - tier definitions (hybrid: size + county context):
-    - `Mega >= 1,000,000`
-    - `Large 250,000-999,999`
-    - `Mid 100,000-249,999`
-    - `Small 50,000-99,999`
-    - for counties with relevant-group population `< 50,000`:
-      - `Suburban`: RUCC metro/adjacent (`1, 2, 3, 4, 6, 8`)
-      - `Rural`: RUCC non-adjacent (`5, 7, 9`)
-  - RUCC source:
-    - USDA ERS county classification file: `raw_data/County_Classifications.csv`
-    - field used: `RuralUrbanContinuumCode2013`
-  - final plotting choices:
-    - grayscale high-contrast lines + distinct linetypes,
-    - right-side direct labels (text-first, no marker stubs),
-    - `Mega` and `Small` emphasized in line/label contrast,
-    - compact tier-key box in the top-right of the Asian panel.
-- county type profiling for no-panethnic counties:
-  - script: `src/analyze_county_urbanicity_no_panethnic.R`
-  - input counties: `outputs/analysis/county_asian_population_no_panethnic_2020.csv`, `outputs/analysis/county_latino_population_no_panethnic_2020.csv`
-  - total population source: `processed_data/population/census_county_2020_pl_total_asian_latino.json` (Census 2020 PL, county)
-  - urbanicity rule: `urban >= 50,000`, `suburban 10,000-49,999`, `rural < 10,000` (county total population)
-  - outputs:
-    - `outputs/analysis/county_no_panethnic_urbanicity_2020.csv`
-    - `outputs/analysis/county_no_panethnic_urbanicity_summary_2020.csv`
-- denominator note for organizational-type-by-decade visuals:
-  - total enriched orgs: `12,702`
-  - after figure base filters (`panethnic_group` in `asian/latino`, valid `fnd_yr`, non-`unknown` `org_type`): `9,688`
-  - plotted in `panethnic_share_by_category_decade` outputs after cell filter `org_n >= 5`: `9,564`
-  - excluded only by sparse cell rule (`n < 5`): `124`
+- **Population vs. organizational presence by urbanicity**
+  - script: `src/visualize_population_org_urbanicity.R`
+  - output figure: `outputs/figures/population_org_urbanicity_mismatch.png`
+  - output table: `outputs/analysis/population_org_urbanicity_mismatch.csv`
+  - scope: panethnic orgs only; population from 2020 Census (county-level)
+  - design: dumbbell plot (population share vs org share by urbanicity) paired with civic opportunity index bars; urbanicity classified by USDA RUCC 2013 codes (Urban = RUCC 1; Suburban = RUCC 2–3; Rural = RUCC 4–9)
+  - civic opportunity index: average of membership, volunteering, events, and civic and political action indicators
 
 Phase 08: Supervised ML validation — group classification + panethnic/ethnic prediction
 
