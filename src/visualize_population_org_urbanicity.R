@@ -175,12 +175,12 @@ library(patchwork)
 p_combined <- p_dumb + p_civ +
   plot_layout(widths = c(1.6, 1)) +
   plot_annotation(
-    title    = "Where population grows, organizations and civic opportunity lag",
-    subtitle = "Panethnic Asian American and Latino organizations; 2020 Census population; IRS incorporation year",
+    title    = "Panethnic organizations and civic opportunity are more urban than the populations they serve",
+    subtitle = "Panethnic Asian American and Latino organizations only; 2020 Census population",
     caption  = paste0(
       "Urbanicity defined by USDA Rural-Urban Continuum Codes (RUCC 2013): ",
       "Urban = RUCC 1 (large metro); Suburban = RUCC 2–3 (smaller metro); Rural = RUCC 4–9 (non-metro).\n",
-      "Civic opportunity index = average of membership, volunteering, events, and civic action indicators."
+      "Civic opportunity index = average of membership, volunteering, events, and civic and political action indicators."
     ),
     theme = theme(
       plot.title    = element_text(face = "bold", size = 15),
