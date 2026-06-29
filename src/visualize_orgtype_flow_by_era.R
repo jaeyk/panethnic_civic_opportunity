@@ -239,9 +239,9 @@ p <- ggplot() +
   labs(
     y     = "Proportion",
     x     = NULL,
-    title   = "How panethnic organizational types shifted: 1960s–1970s vs. Post-1981",
-    x       = NULL,
-    caption = "Periods defined by IRS incorporation year (fnd_yr)."
+    title    = "How panethnic organizational types shifted: 1960s–1970s vs. Post-1981",
+    subtitle = "Periods defined by IRS incorporation year",
+    x        = NULL
   ) +
   theme_minimal(base_size = 15) +
   theme(
@@ -249,7 +249,7 @@ p <- ggplot() +
     panel.grid.minor   = element_blank(),
     axis.text.x        = element_blank(),
     axis.ticks.x       = element_blank(),
-    plot.caption       = element_text(size = 11, color = "grey40", hjust = 0.5),
+    plot.subtitle      = element_text(size = 12, color = "black"),
     axis.text.y        = element_text(size = 13),
     axis.title.y       = element_text(size = 14),
     strip.text         = element_text(face = "bold", size = 16),
