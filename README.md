@@ -266,6 +266,51 @@ Phase 06: Visualization and communication
 - Deliverables:
   - publication-ready figures and a compact city-selection rationale appendix.
 
+- org-type composition flow figure (1960s–70s vs. Post-1981):
+  - script: `src/visualize_orgtype_flow_by_era.R`
+  - output figure: `outputs/figures/orgtype_flow_great_society_vs_reagan.png`
+  - output table: `outputs/analysis/orgtype_flow_great_society_vs_reagan.csv`
+  - scope: panethnic orgs only (`detection_strategy` ∈ `direct_RE`, `indirect_RE`, `ground_truth`); period defined by IRS incorporation year (`fnd_yr`)
+  - design: alluvial flow plot with decreasing types (dark grey) stacked at top, increasing types (light grey) at bottom; black lines separate each flow
+  - sample sizes: Asian 1960s–70s n=131, Post-1981 n=864; Latino 1960s–70s n=175, Post-1981 n=1,269
+  - **Asian American proportion shifts** (1960s–70s → Post-1981, percentage points):
+
+    | Org type | 1960s–70s | Post-1981 | Change (pp) |
+    | --- | ---: | ---: | ---: |
+    | Civic/political | 32.1% | 10.9% | −21.2 |
+    | Religious | 19.8% | 10.4% | −9.4 |
+    | Community | 13.0% | 9.4% | −3.6 |
+    | Healthcare | 6.1% | 3.1% | −3.0 |
+    | Youth | 4.6% | 1.6% | −3.0 |
+    | Housing | 3.1% | 2.0% | −1.1 |
+    | Professional | 2.3% | 14.7% | +12.4 |
+    | Hobby and sports | 1.5% | 10.0% | +8.4 |
+    | Economic | 5.3% | 11.2% | +5.9 |
+    | Arts and cultural | 5.3% | 10.9% | +5.5 |
+    | Social and fraternal | 0.0% | 4.3% | +4.3 |
+    | Foundations | 0.0% | 3.1% | +3.1 |
+    | Research | 3.8% | 4.9% | +1.0 |
+    | Education | 3.1% | 3.4% | +0.3 |
+
+  - **Latino proportion shifts** (1960s–70s → Post-1981, percentage points):
+
+    | Org type | 1960s–70s | Post-1981 | Change (pp) |
+    | --- | ---: | ---: | ---: |
+    | Religious | 57.1% | 14.3% | −42.9 |
+    | Community | 9.7% | 5.8% | −3.9 |
+    | Housing | 3.4% | 1.3% | −2.1 |
+    | Healthcare | 2.9% | 1.0% | −1.8 |
+    | Civic/political | 8.6% | 19.4% | +10.8 |
+    | Economic | 3.4% | 13.8% | +10.4 |
+    | Professional | 2.3% | 11.3% | +9.1 |
+    | Hobby and sports | 0.0% | 5.4% | +5.4 |
+    | Social and fraternal | 0.0% | 5.4% | +5.4 |
+    | Arts and cultural | 3.4% | 6.5% | +3.1 |
+    | Youth | 1.1% | 3.8% | +2.6 |
+    | Education | 6.3% | 8.4% | +2.1 |
+    | Foundations | 1.1% | 2.2% | +1.1 |
+    | Research | 0.0% | 1.0% | +1.0 |
+
 Current focus figure scripts (kept):
 
 - `src/visualize_panethnic_trend_over_time.R`
