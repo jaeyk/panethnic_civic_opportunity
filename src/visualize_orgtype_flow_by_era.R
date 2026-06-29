@@ -29,7 +29,7 @@ COLORS <- c("Increase" = "grey70", "Decrease" = "grey30")
 
 TYPE_LABELS <- c(
   religious       = "Religious",
-  civic           = "Civic/political",
+  civic           = "Political",
   education       = "Education",
   arts            = "Arts and cultural",
   socialfraternal = "Social and fraternal",
