@@ -66,6 +66,17 @@ The −34 from adding URL verification breaks down as: 5 confirmed URL mismatche
 
 Final breakdown: Asian 132, Latino 45, Both 1 (out of 4,466 `ethnic_named` orgs with usable about-page text).
 
+**Final organization counts (post-reclassification, from `org_civic_enriched.csv`):**
+
+| Scope | Asian | Latino | Total |
+| --- | ---: | ---: | ---: |
+| Panethnic (direct name + reclassified + ground truth) | 1,259 | 2,012 | 3,304 |
+| — of which: reclassified ethnic → panethnic (`indirect_RE`) | 125 | 43 | 169 |
+| Ethnic (ethnic-named, not reclassified) | 7,228 | 1,020 | 8,304 |
+| **Grand total** | **8,487** | **3,032** | **11,608** |
+
+Note: `indirect_RE` counts (169) differ slightly from step 05's upgraded count (178) because step 06 applies additional cross-referencing filters.
+
 Each org also carries a `detection_method` field:
 
 - `RE` — identified by regex only (direct or indirect)
