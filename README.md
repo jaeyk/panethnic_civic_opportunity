@@ -12,7 +12,7 @@ This repository contains two raw-data pipelines:
      - `raw_data/irs_data/irs_urls_websites.csv`
      - `raw_data/irs_data/irs_url_checks.csv`
    - These URL-linked IRS records are used to connect organizations to websites and support web scraping/enrichment.
-   - **URL reliability note**: `irs_urls.csv` contains two URL fields per EIN: `irs_url` (self-reported by the organization to the IRS; available for ~16% of ethnic-named orgs) and `first_link` / `preferred_link` (scraped/inferred from external sources; more common but less reliable). The `preferred_link` field occasionally maps an EIN to the wrong organization's website. Step `04c` catches these mismatches using hard-coded confirmed cases, IRS self-reported URL conflicts, and bot-blocked content signals.
+   - **URL reliability note**: `irs_urls.csv` contains two URL fields per EIN: `irs_url` (self-reported by the organization to the IRS; available for ~16% of ethnic-named orgs) and `first_link` / `preferred_link` (inferred from external crawls). The vast majority of inferred links are correct, but a small number map an EIN to an entirely different organization's website — a consequential error when the wrong page contains panethnic language. Step `04c` targets these rare cases using hard-coded confirmed mismatches, IRS self-reported URL domain conflicts, and bot-blocked content signals.
 
 2. **Org data**
    - The organization dataset generation notes are in `misc/org_data`.
