@@ -4,8 +4,11 @@ suppressPackageStartupMessages({ library(data.table) })
 
 parse_args <- function(args) {
   cfg <- list(
+    # Sampling frame 
     irs_mbf = "raw_data/irs_data/irs_mbf.csv",
+    # Filtering condition 
     irs_urls = "raw_data/irs_data/irs_urls.csv",
+    # Training data (ground truth)
     out_file = "processed_data/org_matching/potential_asian_latino_orgs.csv"
   )
   if (length(args) == 0) return(cfg)
@@ -37,7 +40,9 @@ main <- function() {
                           fifelse(!is.na(irs_url) & irs_url != "", irs_url, first_link))]
 
   nm <- tolower(dt$name)
+  # Direct panethnic pattern 
   direct_pattern <- "\\b(asian|asian american|asian pacific|aapi|latino|latina|latinx|hispanic|la raza|centro)\\b"
+  # Indirect panethnic pattern (ethnic but can be panethnic if one inspects its website)
   ethnic_pattern <- "\\b(chinese|chinatown|japanese|filipino|korean|vietnamese|cambodian|thai|hmong|samoan|pacific islander|mexican|chicano|chicana|puerto rican|cuban|salvadoran|guatemalan|dominican|colombian|peruvian|spanish)\\b"
 
   dt[, direct_flag := grepl(direct_pattern, nm, perl = TRUE)]

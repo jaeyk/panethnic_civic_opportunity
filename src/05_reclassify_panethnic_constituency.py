@@ -6,8 +6,8 @@ there is sentence-level evidence that panethnic groups are described as the
 organization's constituencies.
 
 Design goals:
-- No third-party dependencies (works in restricted environments).
-- Use both lexical constraints and an embedding-like similarity signal.
+- Use sentence-transformers (all-MiniLM-L6-v2) for semantic similarity.
+- Scan all sentences in the about page (no sentence cap).
 - Emit auditable evidence sentences and confidence scores.
 """
 
@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
-import math
 import os
 import re
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 ASIAN_TERMS = {
     "asian",
@@ -57,13 +57,6 @@ CUE_PATTERNS = [
     r"\bconstituenc(?:y|ies)\b",
 ]
 
-TOKEN_RE = re.compile(r"[a-z0-9']+")
-SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
-BAD_SCRAPE_RE = re.compile(
-    r"^(?:scrape_error:|does not have about page|is broken|is flat|php error)",
-    re.IGNORECASE,
-)
-
 PROTOTYPES = {
     "asian": [
         "we serve asian american communities and families",
@@ -77,10 +70,24 @@ PROTOTYPES = {
     ],
 }
 
-_W_PROTO: Dict[str, List[float]] = {}
-_W_MIN_SCORE: float = 0.52
-_W_MIN_SIMILARITY: float = 0.22
-_W_MAX_SENTENCES: int = 30
+SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+BAD_SCRAPE_RE = re.compile(
+    r"^(?:scrape_error:|does not have about page|is broken|is flat|php error)",
+    re.IGNORECASE,
+)
+
+# Module-level model and prototype embeddings (loaded once)
+_MODEL: Optional[SentenceTransformer] = None
+_PROTO_EMBS: Dict[str, np.ndarray] = {}
+
+
+def load_model(model_name: str = "all-MiniLM-L6-v2") -> None:
+    global _MODEL, _PROTO_EMBS
+    _MODEL = SentenceTransformer(model_name)
+    for group, sents in PROTOTYPES.items():
+        embs = _MODEL.encode(sents, normalize_embeddings=True, show_progress_bar=False)
+        agg = embs.mean(axis=0)
+        _PROTO_EMBS[group] = agg / np.linalg.norm(agg)
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,12 +95,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--about_input",
         default="processed_data/org_matching/candidate_about_pages.csv",
-        help="About-page CSV (must include ein and about_page_text).",
     )
     p.add_argument(
         "--candidates_input",
         default="processed_data/org_matching/similar_org_candidates.csv",
-        help="Optional fallback candidate table for candidate_type/name joins.",
     )
     p.add_argument(
         "--out_file",
@@ -103,11 +108,10 @@ def parse_args() -> argparse.Namespace:
         "--evidence_file",
         default="processed_data/org_matching/panethnic_constituency_sentence_evidence.csv",
     )
-    p.add_argument("--min_score", type=float, default=0.52)
-    p.add_argument("--min_similarity", type=float, default=0.22)
-    p.add_argument("--max_sentences", type=int, default=30)
-    p.add_argument("--workers", type=int, default=1)
-    p.add_argument("--chunk_size", type=int, default=100)
+    p.add_argument("--min_score", type=float, default=0.45)
+    p.add_argument("--min_similarity", type=float, default=0.40)
+    p.add_argument("--model_name", type=str, default="all-MiniLM-L6-v2")
+    p.add_argument("--batch_size", type=int, default=128)
     return p.parse_args()
 
 
@@ -118,34 +122,17 @@ def norm_ein(x: str) -> str:
 
 def clean_text(x: str) -> str:
     txt = (x or "").strip()
-    txt = re.sub(r"\s+", " ", txt)
-    return txt
+    return re.sub(r"\s+", " ", txt)
 
 
-def normalize_sentence(x: str) -> str:
-    s = clean_text(x).lower()
-    s = re.sub(r"\s+", " ", s)
-    return s
-
-
-def split_sentences(text: str, max_sentences: int) -> List[str]:
+def split_sentences(text: str) -> List[str]:
     if not text:
         return []
-    raw = SPLIT_RE.split(text)
-    out: List[str] = []
-    for s in raw:
-        t = clean_text(s)
-        if len(t) < 20:
-            continue
-        out.append(t)
-        if len(out) >= max_sentences:
-            break
-    return out
+    return [s for s in (clean_text(s) for s in SPLIT_RE.split(text)) if len(s) >= 20]
 
 
 def has_phrase(sentence_norm: str, phrase: str) -> bool:
-    pattern = r"\b" + re.escape(phrase) + r"\b"
-    return bool(re.search(pattern, sentence_norm))
+    return bool(re.search(r"\b" + re.escape(phrase) + r"\b", sentence_norm))
 
 
 def group_term_hits(sentence_norm: str, group: str) -> int:
@@ -158,130 +145,36 @@ def cue_score(sentence_norm: str) -> float:
     return min(1.0, hits / 3.0)
 
 
-def token_vector(token: str, dim: int = 192, width: int = 4) -> List[float]:
-    """Sparse hashed token embedding with deterministic signed buckets."""
-    vec = [0.0] * dim
-    h = hashlib.sha1(token.encode("utf-8")).hexdigest()
-    for k in range(width):
-        start = k * 8
-        block = int(h[start : start + 8], 16)
-        idx = block % dim
-        sign = 1.0 if (block >> 1) % 2 == 0 else -1.0
-        vec[idx] += sign
-    return vec
-
-
-def sentence_embedding(text: str, dim: int = 192) -> List[float]:
-    toks = TOKEN_RE.findall(normalize_sentence(text))
-    if not toks:
-        return [0.0] * dim
-    vec = [0.0] * dim
-    for tk in toks:
-        tv = token_vector(tk, dim=dim)
-        for i in range(dim):
-            vec[i] += tv[i]
-    norm = math.sqrt(sum(v * v for v in vec))
-    if norm == 0:
-        return vec
-    return [v / norm for v in vec]
-
-
-def cosine(u: Sequence[float], v: Sequence[float]) -> float:
-    return sum(a * b for a, b in zip(u, v))
-
-
-def build_group_prototypes() -> Dict[str, List[float]]:
-    out: Dict[str, List[float]] = {}
-    for group, lines in PROTOTYPES.items():
-        embs = [sentence_embedding(x) for x in lines]
-        agg = [0.0] * len(embs[0])
-        for e in embs:
-            for i, val in enumerate(e):
-                agg[i] += val
-        norm = math.sqrt(sum(v * v for v in agg))
-        out[group] = [v / norm for v in agg] if norm else agg
-    return out
-
-
-def score_sentence(sentence: str, proto: Dict[str, List[float]]) -> Dict[str, float]:
-    s_norm = normalize_sentence(sentence)
-    emb = sentence_embedding(sentence)
-    cue = cue_score(s_norm)
-
-    out: Dict[str, float] = {
-        "cue": cue,
-        "asian_term_hits": float(group_term_hits(s_norm, "asian")),
-        "latino_term_hits": float(group_term_hits(s_norm, "latino")),
-    }
-
-    for g in ("asian", "latino"):
-        sim = cosine(emb, proto[g])
-        term_bonus = min(1.0, out[f"{g}_term_hits"] / 2.0)
-        out[f"sim_{g}"] = sim
-        out[f"score_{g}"] = 0.6 * sim + 0.3 * cue + 0.1 * term_bonus
-
-    return out
-
-
-def resolve_about_path(path: str) -> str:
-    if os.path.exists(path):
-        return path
-    alt = path.replace("candidate_about_pages.csv", "candidate_about_pages_browser.csv")
-    if alt != path and os.path.exists(alt):
-        return alt
-    return path
-
-
-def read_candidates_map(path: str) -> Dict[str, Dict[str, str]]:
-    out: Dict[str, Dict[str, str]] = {}
-    if not path or not os.path.exists(path):
-        return out
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ein = norm_ein(row.get("ein", ""))
-            if not ein:
-                continue
-            out[ein] = {
-                "candidate_type": (row.get("candidate_type") or "").strip(),
-                "irs_name_raw": (row.get("irs_name_raw") or "").strip(),
-            }
-    return out
-
-
 def should_skip_text(text: str) -> bool:
-    if not text:
-        return True
-    t = text.strip()
-    if not t:
-        return True
-    if BAD_SCRAPE_RE.search(t):
-        return True
-    return False
+    t = (text or "").strip()
+    return not t or bool(BAD_SCRAPE_RE.search(t))
 
 
-def pick_reclass(best_asian: Optional[Dict[str, object]], best_latino: Optional[Dict[str, object]], min_score: float, min_similarity: float) -> Tuple[str, float, str]:
-    asian_ok = False
-    latino_ok = False
-
-    if best_asian is not None:
-        asian_ok = (
-            float(best_asian["score"]) >= min_score
-            and float(best_asian["similarity"]) >= min_similarity
-            and float(best_asian["cue"]) > 0
-            and int(best_asian["term_hits"]) > 0
+def pick_reclass(
+    best_asian: Optional[Dict],
+    best_latino: Optional[Dict],
+    min_score: float,
+    min_similarity: float,
+) -> Tuple[str, float, str]:
+    def passes(b: Optional[Dict]) -> bool:
+        return (
+            b is not None
+            and float(b["score"]) >= min_score
+            and float(b["similarity"]) >= min_similarity
+            and float(b["cue"]) > 0
+            and int(b["term_hits"]) > 0
         )
-    if best_latino is not None:
-        latino_ok = (
-            float(best_latino["score"]) >= min_score
-            and float(best_latino["similarity"]) >= min_similarity
-            and float(best_latino["cue"]) > 0
-            and int(best_latino["term_hits"]) > 0
-        )
+
+    asian_ok = passes(best_asian)
+    latino_ok = passes(best_latino)
 
     if asian_ok and latino_ok:
         conf = max(float(best_asian["score"]), float(best_latino["score"]))
-        evidence = str(best_asian["sentence"]) if float(best_asian["score"]) >= float(best_latino["score"]) else str(best_latino["sentence"])
+        evidence = (
+            str(best_asian["sentence"])
+            if float(best_asian["score"]) >= float(best_latino["score"])
+            else str(best_latino["sentence"])
+        )
         return "both", conf, evidence
     if asian_ok:
         return "asian", float(best_asian["score"]), str(best_asian["sentence"])
@@ -290,73 +183,66 @@ def pick_reclass(best_asian: Optional[Dict[str, object]], best_latino: Optional[
     return "uncertain", 0.0, ""
 
 
-def _init_worker(proto: Dict[str, List[float]], min_score: float, min_similarity: float, max_sentences: int) -> None:
-    global _W_PROTO, _W_MIN_SCORE, _W_MIN_SIMILARITY, _W_MAX_SENTENCES
-    _W_PROTO = proto
-    _W_MIN_SCORE = min_score
-    _W_MIN_SIMILARITY = min_similarity
-    _W_MAX_SENTENCES = max_sentences
-
-
-def _process_prepared_row(row: Dict[str, str]) -> Tuple[Optional[Dict[str, object]], List[Dict[str, object]]]:
+def process_org(
+    row: Dict[str, str],
+    min_score: float,
+    min_similarity: float,
+) -> Tuple[Optional[Dict], List[Dict]]:
     ein = row["ein"]
     candidate_type = row["candidate_type"]
     irs_name = row["irs_name_raw"]
     text = row["about_page_text"]
 
-    sentences = split_sentences(text, max_sentences=_W_MAX_SENTENCES)
+    sentences = split_sentences(text)
     if not sentences:
         return None, []
 
-    evidence_rows: List[Dict[str, object]] = []
-    best_asian: Optional[Dict[str, object]] = None
-    best_latino: Optional[Dict[str, object]] = None
+    # Batch encode all sentences at once
+    norms = [s.lower() for s in sentences]
+    embs = _MODEL.encode(sentences, normalize_embeddings=True, show_progress_bar=False)
 
-    for s in sentences:
-        metrics = score_sentence(s, _W_PROTO)
-        asian_hits = int(metrics["asian_term_hits"])
-        latino_hits = int(metrics["latino_term_hits"])
+    evidence_rows: List[Dict] = []
+    best_asian: Optional[Dict] = None
+    best_latino: Optional[Dict] = None
 
-        if asian_hits > 0:
+    for s, s_norm, emb in zip(sentences, norms, embs):
+        asian_hits = group_term_hits(s_norm, "asian")
+        latino_hits = group_term_hits(s_norm, "latino")
+        if asian_hits == 0 and latino_hits == 0:
+            continue
+
+        cue = cue_score(s_norm)
+
+        for group, hits in (("asian", asian_hits), ("latino", latino_hits)):
+            if hits == 0:
+                continue
+            sim = float(np.dot(emb, _PROTO_EMBS[group]))
+            term_bonus = min(1.0, hits / 2.0)
+            score = 0.6 * sim + 0.3 * cue + 0.1 * term_bonus
+
             rec = {
                 "ein": ein,
                 "candidate_type": candidate_type,
                 "irs_name_raw": irs_name,
                 "sentence": s,
-                "group": "asian",
-                "score": float(metrics["score_asian"]),
-                "similarity": float(metrics["sim_asian"]),
-                "cue": float(metrics["cue"]),
-                "term_hits": asian_hits,
+                "group": group,
+                "score": round(score, 6),
+                "similarity": round(sim, 6),
+                "cue": round(cue, 6),
+                "term_hits": hits,
             }
             evidence_rows.append(rec)
-            if best_asian is None or rec["score"] > best_asian["score"]:
+
+            if group == "asian" and (best_asian is None or score > best_asian["score"]):
                 best_asian = rec
-
-        if latino_hits > 0:
-            rec = {
-                "ein": ein,
-                "candidate_type": candidate_type,
-                "irs_name_raw": irs_name,
-                "sentence": s,
-                "group": "latino",
-                "score": float(metrics["score_latino"]),
-                "similarity": float(metrics["sim_latino"]),
-                "cue": float(metrics["cue"]),
-                "term_hits": latino_hits,
-            }
-            evidence_rows.append(rec)
-            if best_latino is None or rec["score"] > best_latino["score"]:
+            if group == "latino" and (best_latino is None or score > best_latino["score"]):
                 best_latino = rec
 
     if best_asian is None and best_latino is None:
         return None, evidence_rows
 
     reclass_group, conf, evidence = pick_reclass(
-        best_asian,
-        best_latino,
-        min_score=_W_MIN_SCORE,
-        min_similarity=_W_MIN_SIMILARITY,
+        best_asian, best_latino, min_score=min_score, min_similarity=min_similarity
     )
 
     reclass_row = {
@@ -370,13 +256,36 @@ def _process_prepared_row(row: Dict[str, str]) -> Tuple[Optional[Dict[str, objec
         "latino_sentence_score": round(float(best_latino["score"]), 6) if best_latino else "",
         "asian_similarity": round(float(best_asian["similarity"]), 6) if best_asian else "",
         "latino_similarity": round(float(best_latino["similarity"]), 6) if best_latino else "",
-        "method": "lexical_plus_hash_embedding",
+        "method": "sentence_transformers_all-MiniLM-L6-v2",
     }
     return reclass_row, evidence_rows
 
 
+def read_candidates_map(path: str) -> Dict[str, Dict[str, str]]:
+    out: Dict[str, Dict[str, str]] = {}
+    if not path or not os.path.exists(path):
+        return out
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            ein = norm_ein(row.get("ein", ""))
+            if ein:
+                out[ein] = {
+                    "candidate_type": (row.get("candidate_type") or "").strip(),
+                    "irs_name_raw": (row.get("irs_name_raw") or "").strip(),
+                }
+    return out
+
+
+def resolve_about_path(path: str) -> str:
+    if os.path.exists(path):
+        return path
+    alt = path.replace("candidate_about_pages.csv", "candidate_about_pages_browser.csv")
+    return alt if alt != path and os.path.exists(alt) else path
+
+
 def main() -> None:
     args = parse_args()
+
     about_path = resolve_about_path(args.about_input)
     if not os.path.exists(about_path):
         raise SystemExit(f"about_input not found: {args.about_input}")
@@ -384,116 +293,70 @@ def main() -> None:
     os.makedirs(os.path.dirname(args.out_file), exist_ok=True)
     os.makedirs(os.path.dirname(args.evidence_file), exist_ok=True)
 
+    print(f"Loading model: {args.model_name} ...")
+    load_model(args.model_name)
+
     candidates_map = read_candidates_map(args.candidates_input)
-    proto = build_group_prototypes()
 
-    reclass_rows: List[Dict[str, object]] = []
-    evidence_rows: List[Dict[str, object]] = []
     prepared_rows: List[Dict[str, str]] = []
-
     with open(about_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
+        for row in csv.DictReader(f):
             ein = norm_ein(row.get("ein", ""))
             if not ein:
                 continue
-
             candidate_type = (row.get("candidate_type") or "").strip()
             irs_name = (row.get("irs_name_raw") or "").strip()
-
             if not candidate_type and ein in candidates_map:
                 candidate_type = candidates_map[ein].get("candidate_type", "")
             if not irs_name and ein in candidates_map:
                 irs_name = candidates_map[ein].get("irs_name_raw", "")
-
-            # Scope: only ethnic-name candidates are eligible for this upgrade.
             if candidate_type != "ethnic_named":
                 continue
-
             text = clean_text(row.get("about_page_text", ""))
             if should_skip_text(text):
                 continue
+            prepared_rows.append({
+                "ein": ein,
+                "candidate_type": candidate_type,
+                "irs_name_raw": irs_name,
+                "about_page_text": text,
+            })
 
-            prepared_rows.append(
-                {
-                    "ein": ein,
-                    "candidate_type": candidate_type,
-                    "irs_name_raw": irs_name,
-                    "about_page_text": text,
-                }
-            )
+    print(f"Processing {len(prepared_rows)} ethnic-named orgs with usable text ...")
 
-    workers = max(1, int(args.workers))
-    chunk_size = max(1, int(args.chunk_size))
-    _init_worker(proto, args.min_score, args.min_similarity, args.max_sentences)
+    reclass_rows: List[Dict] = []
+    evidence_rows: List[Dict] = []
 
-    if workers == 1:
-        for row in prepared_rows:
-            rc_row, ev_rows = _process_prepared_row(row)
-            if rc_row is not None:
-                reclass_rows.append(rc_row)
-            if ev_rows:
-                evidence_rows.extend(ev_rows)
-    else:
-        try:
-            with ProcessPoolExecutor(
-                max_workers=workers,
-                initializer=_init_worker,
-                initargs=(proto, args.min_score, args.min_similarity, args.max_sentences),
-            ) as ex:
-                for rc_row, ev_rows in ex.map(_process_prepared_row, prepared_rows, chunksize=chunk_size):
-                    if rc_row is not None:
-                        reclass_rows.append(rc_row)
-                    if ev_rows:
-                        evidence_rows.extend(ev_rows)
-        except (PermissionError, OSError):
-            # Some restricted environments disallow process semaphores.
-            print("Process pool unavailable in this environment; falling back to thread pool.")
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                for rc_row, ev_rows in ex.map(_process_prepared_row, prepared_rows):
-                    if rc_row is not None:
-                        reclass_rows.append(rc_row)
-                    if ev_rows:
-                        evidence_rows.extend(ev_rows)
+    for i, row in enumerate(prepared_rows):
+        rc_row, ev_rows = process_org(row, args.min_score, args.min_similarity)
+        if rc_row is not None:
+            reclass_rows.append(rc_row)
+        evidence_rows.extend(ev_rows)
+        if (i + 1) % 500 == 0:
+            print(f"  {i + 1}/{len(prepared_rows)} processed ...")
 
     reclass_rows.sort(key=lambda r: (r["ein"], str(r["reclass_group"])))
     evidence_rows.sort(key=lambda r: (r["ein"], -float(r["score"])))
 
+    reclass_fields = [
+        "ein", "candidate_type", "irs_name_raw", "reclass_group",
+        "reclass_confidence", "reclass_evidence_sentence",
+        "asian_sentence_score", "latino_sentence_score",
+        "asian_similarity", "latino_similarity", "method",
+    ]
     with open(args.out_file, "w", newline="", encoding="utf-8") as f:
-        fields = [
-            "ein",
-            "candidate_type",
-            "irs_name_raw",
-            "reclass_group",
-            "reclass_confidence",
-            "reclass_evidence_sentence",
-            "asian_sentence_score",
-            "latino_sentence_score",
-            "asian_similarity",
-            "latino_similarity",
-            "method",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=reclass_fields)
         writer.writeheader()
-        for row in reclass_rows:
-            writer.writerow(row)
+        writer.writerows(reclass_rows)
 
+    evidence_fields = [
+        "ein", "candidate_type", "irs_name_raw",
+        "group", "score", "similarity", "cue", "term_hits", "sentence",
+    ]
     with open(args.evidence_file, "w", newline="", encoding="utf-8") as f:
-        fields = [
-            "ein",
-            "candidate_type",
-            "irs_name_raw",
-            "group",
-            "score",
-            "similarity",
-            "cue",
-            "term_hits",
-            "sentence",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=evidence_fields)
         writer.writeheader()
-        for row in evidence_rows:
-            writer.writerow(row)
+        writer.writerows(evidence_rows)
 
     total = len(reclass_rows)
     kept = sum(1 for r in reclass_rows if r["reclass_group"] in {"asian", "latino", "both"})

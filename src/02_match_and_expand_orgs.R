@@ -1,5 +1,38 @@
 #!/usr/bin/env Rscript
 
+# =============================================================================
+# LAST RUN PERFORMANCE (2026-06-26)
+# Method   : LinkOrgs bipartite, threshold 0.87, fallback = fuzzy
+# Input    : 818 ground-truth orgs (299 Asian, 519 Latino)
+# Matched  : 671  (82.0%)   Target: 90.0%   STATUS: NOT MET  (+51 vs prior run)
+# Unmatched: 147  (18.0%)
+#
+# Failure mode breakdown (unmatched = 147):
+#   score 0.85-0.87 (close miss)  :  32  — org present but name diverges
+#   score 0.80-0.85               :  40  — org present or name too different
+#   score 0.70-0.80               :  41  — likely absent from IRS MBF
+#   score < 0.70                  :  34  — absent or dissolved
+#
+# Improvements applied vs prior run (75.8% → 82.0%):
+#   - distinctive_token() blocks on ethnic/panethnic term first ("asian",
+#     "hispanic") instead of generic first word ("coalition", "national")
+#   - token-overlap filter narrows pools > 500 rows before fuzzy scoring
+#   - threshold lowered 0.90 → 0.87 to recover abbreviation-divergence cases
+#     (e.g. "Mutual Assistance Associations" vs IRS name "MAA")
+# Remaining gap: ~100 orgs likely absent from or dissolved in IRS MBF
+# =============================================================================
+
+# data checks
+asian_ground_truth <- "raw_data/org_data_ground_truth/asian_org.csv"
+latino_ground_truth <- "raw_data/org_data_ground_truth/latino_org.csv"
+irs_mbf <- "raw_data/irs_data/irs_mbf.csv"
+irs_urls <- "raw_data/irs_data/irs_urls.csv"
+
+nrow(read.csv(asian_ground_truth)) #299
+nrow(read.csv(latino_ground_truth)) #519
+nrow(read.csv(irs_mbf)) #1,774,177 
+nrow(read.csv(irs_urls)) #1,749,937
+
 suppressPackageStartupMessages({
   library(data.table)
   library(stringdist)
@@ -18,7 +51,7 @@ parse_args <- function(args) {
     matching_method = "linkorgs",
     linkorgs_algorithm = "bipartite",
     fallback_to_fuzzy = TRUE,
-    match_threshold = 0.90,
+    match_threshold = 0.87,
     target_match_rate = 0.90,
     scrape_about = FALSE,
     scrape_scope = "all_candidates",
@@ -78,6 +111,32 @@ second_token <- function(x) {
   out <- sub(" .*", "", out)
   out[out == ""] <- NA_character_
   out
+}
+
+ETHNIC_BLOCKING_TERMS <- c(
+  "asian", "aapi", "latino", "latina", "latinx", "hispanic",
+  "chinese", "japanese", "korean", "vietnamese", "filipino",
+  "cambodian", "thai", "hmong", "samoan", "mexican", "chicano",
+  "chicana", "pacific"
+)
+
+GENERIC_FIRST_TOKENS <- c(
+  "national", "coalition", "center", "association", "society",
+  "foundation", "institute", "committee", "office", "program",
+  "network", "alliance", "council", "organization"
+)
+
+# Returns the most distinctive blocking token for a normalized org name.
+# Prioritises ethnic/panethnic terms over generic first tokens so that
+# "Coalition for Asian American Children" blocks on "asian", not "coalition".
+distinctive_token <- function(nm) {
+  toks <- strsplit(nm, " ")[[1L]]
+  hit <- toks[toks %in% ETHNIC_BLOCKING_TERMS]
+  if (length(hit) > 0L) return(hit[1L])
+  non_gen <- toks[!toks %in% GENERIC_FIRST_TOKENS & nchar(toks) >= 4L]
+  if (length(non_gen) > 0L) return(non_gen[1L])
+  if (length(toks) > 0L) return(toks[1L])
+  NA_character_
 }
 
 compute_similarity <- function(a, b) {
@@ -157,20 +216,41 @@ prepare_candidates <- function(org_row, irs_dt, fallback_n = 25000L) {
   t1 <- org_row[["tok1"]]
   t2 <- org_row[["tok2"]]
   nm <- org_row[["org_name_norm"]]
+  dt <- distinctive_token(nm)
 
-  candidates <- irs_dt[irs_state == st & tok1 == t1]
+  # Pass 1: state + distinctive (ethnic/panethnic) token — highest precision.
+  # Fixes cases like "Coalition for Asian American Children" which previously
+  # blocked on "coalition" (1000+ candidates) instead of "asian" (~50).
+  candidates <- if (!is.na(dt)) irs_dt[irs_state == st & dtok == dt] else data.table()
+  # Pass 2: state + first token
+  if (nrow(candidates) == 0L) candidates <- irs_dt[irs_state == st & tok1 == t1]
+  # Pass 3: state + second token
   if (nrow(candidates) == 0L && !is.na(t2)) candidates <- irs_dt[irs_state == st & tok2 == t2]
+  # Pass 4: state only
   if (nrow(candidates) == 0L) candidates <- irs_dt[irs_state == st]
+  # Pass 5: distinctive token nationally
+  if (nrow(candidates) == 0L && !is.na(dt)) candidates <- irs_dt[dtok == dt]
+  # Pass 6: first token nationally
   if (nrow(candidates) == 0L) candidates <- irs_dt[tok1 == t1]
+  # Pass 7: second token nationally
   if (nrow(candidates) == 0L && !is.na(t2)) candidates <- irs_dt[tok2 == t2]
-
+  # Pass 8: first-character seed
   if (nrow(candidates) == 0L) {
-    seed <- substr(nm, 1, 1)
-    candidates <- irs_dt[substr(irs_name_norm, 1, 1) == seed]
+    seed <- substr(nm, 1L, 1L)
+    candidates <- irs_dt[substr(irs_name_norm, 1L, 1L) == seed]
   }
+  if (nrow(candidates) == 0L) candidates <- irs_dt[1:min(nrow(irs_dt), fallback_n)]
 
-  if (nrow(candidates) == 0L) {
-    candidates <- irs_dt[1:min(nrow(irs_dt), fallback_n)]
+  # When the pool is still large, narrow it to candidates that share at least
+  # one significant token with the query. This prevents high-frequency tokens
+  # ("national", "coalition") from flooding the pool with unrelated orgs.
+  if (nrow(candidates) > 500L) {
+    stop_toks <- c("and", "of", "the", "for", "in", "a", "an", "to", "at")
+    query_toks <- setdiff(strsplit(nm, " ")[[1L]], stop_toks)
+    has_overlap <- vapply(candidates$irs_name_norm, function(x) {
+      any(query_toks %in% strsplit(x, " ")[[1L]])
+    }, logical(1L))
+    if (any(has_overlap)) candidates <- candidates[has_overlap]
   }
 
   candidates
@@ -201,6 +281,7 @@ load_org_data <- function(org_dir, max_org_rows = NA_integer_) {
   org[, state_norm := toupper(trimws(States))]
   org[, tok1 := first_token(org_name_norm)]
   org[, tok2 := second_token(org_name_norm)]
+  org[, dtok := vapply(org_name_norm, distinctive_token, character(1L))]
   if (!is.na(max_org_rows) && max_org_rows > 0L && nrow(org) > max_org_rows) {
     org <- org[1:max_org_rows]
   }
@@ -217,6 +298,7 @@ load_irs_data <- function(irs_mbf, irs_urls, irs_url_checks, max_irs_rows = NA_i
   mbf[, irs_state := toupper(trimws(irs_state))]
   mbf[, tok1 := first_token(irs_name_norm)]
   mbf[, tok2 := second_token(irs_name_norm)]
+  mbf[, dtok := vapply(irs_name_norm, distinctive_token, character(1L))]
 
   urls <- fread(irs_urls, select = c("ein", "taxpayer_name", "preferred_link", "irs_url", "first_link"), encoding = "UTF-8", nrows = nrows_opt)
   urls[, ein := sprintf("%09s", gsub("[^0-9]", "", as.character(ein)))]

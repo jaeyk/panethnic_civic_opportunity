@@ -1,5 +1,28 @@
 #!/usr/bin/env Rscript
 
+# =============================================================================
+# LAST RUN PERFORMANCE  (2026-06-26)
+#
+# Task 1 — Asian vs. Latino Group Classifier  |  5-fold CV
+# Input  : 818 ground-truth orgs  (299 Asian, 519 Latino)
+#   Model         Accuracy  Bal. Acc  Macro-F1  AUC
+#   xgboost       0.965     0.956     0.961     0.996   ← best
+#   ranger        0.961     0.948     0.957     0.991
+#   superlearner  0.951     0.935     0.946     0.995
+#   glmnet        0.763     0.676     0.681     0.967
+#   Best model  : xgboost
+#   Pass ML filter (conf≥0.70, margin≥0.15): 10,764 / 12,677 candidates
+#
+# Task 2 — Panethnic vs. Ethnic Classifier  |  5-fold CV
+# Positive (panethnic=1): 818 ground-truth orgs
+# Negative (panethnic=0): 2,454 ethnic-named IRS candidates not reclassified
+#   Ensemble (avg glmnet+ranger+xgb) | 5-fold CV
+#   Accuracy  Bal. Acc  Macro-F1  AUC
+#   0.966     0.941     0.954     0.992
+#   Scored labels: panethnic=1,870  ethnic=8,976  uncertain=1,831
+#   Output → processed_data/ml_validation/candidate_panethnic_predictions.csv
+# =============================================================================
+
 suppressPackageStartupMessages({
   library(data.table)
   library(Matrix)
@@ -152,12 +175,15 @@ metrics_binary <- function(y_true, p_asian, threshold = 0.5) {
   r0 <- ifelse(tp0 + fn0 == 0, NA, tp0 / (tp0 + fn0))
   f1_0 <- ifelse(is.na(p0) || is.na(r0) || p0 + r0 == 0, NA, 2 * p0 * r0 / (p0 + r0))
 
-  macro_f1 <- mean(c(f1_0, f1_1), na.rm = TRUE)
+  macro_f1         <- mean(c(f1_0, f1_1), na.rm = TRUE)
+  balanced_accuracy <- mean(c(r1, r0),   na.rm = TRUE)
   eps <- 1e-8
-  ll <- -mean(y_true * log(pmax(pmin(p_asian, 1 - eps), eps)) + (1 - y_true) * log(pmax(pmin(1 - p_asian, 1 - eps), eps)))
+  ll  <- -mean(y_true * log(pmax(pmin(p_asian, 1 - eps), eps)) +
+               (1 - y_true) * log(pmax(pmin(1 - p_asian, 1 - eps), eps)))
   auc <- roc_auc_fast(y_true, p_asian)
 
-  data.table(accuracy = acc, macro_f1 = macro_f1, log_loss = ll, auc = auc)
+  data.table(accuracy = acc, balanced_accuracy = balanced_accuracy,
+             macro_f1 = macro_f1, log_loss = ll, auc = auc)
 }
 
 fit_predict_glmnet <- function(Xtr, ytr, Xte) {
@@ -200,7 +226,7 @@ choose_sl_library <- function() {
 main <- function() {
   cfg <- parse_args(commandArgs(trailingOnly = TRUE))
   dir.create(cfg$out_dir, recursive = TRUE, showWarnings = FALSE)
-  total_steps <- as.integer(cfg$folds + 9L)
+  total_steps <- as.integer(cfg$folds + 10L)
   pb <- txtProgressBar(min = 0, max = total_steps, style = 3)
   step <- 0L
   t0 <- Sys.time()
@@ -311,7 +337,8 @@ main <- function() {
     mm[, model := m]
     metric_rows[[length(metric_rows) + 1]] <- mm
   }
-  metrics <- rbindlist(metric_rows, fill = TRUE)[, .(model, accuracy, macro_f1, auc, log_loss)]
+  metrics <- rbindlist(metric_rows, fill = TRUE)[,
+    .(model, accuracy, balanced_accuracy, macro_f1, auc, log_loss)]
 
   # Pick best by macro_f1, then accuracy, then auc.
   setorder(metrics, -macro_f1, -accuracy, -auc, log_loss)
@@ -386,6 +413,106 @@ main <- function() {
   fwrite(cand[pass_ml_filter == TRUE], file.path(cfg$out_dir, "candidate_predictions_pass_ml_filter.csv"))
   fwrite(cand[pass_ml_filter == FALSE], file.path(cfg$out_dir, "candidate_predictions_fail_ml_filter.csv"))
 
+  # === Task 2: Panethnic vs. Ethnic binary classifier ===
+  # Positive (panethnic = 1): all 818 ground-truth orgs (known panethnic)
+  # Negative (panethnic = 0): ethnic-named IRS candidates not reclassified
+  #   by 05_reclassify_panethnic_constituency, used as a proxy for ethnic orgs
+  message("Building panethnic vs. ethnic classifier...")
+
+  ethnic_neg <- cand[!is.na(candidate_type) & candidate_type == "ethnic_named"]
+
+  if (file.exists(cfg$matches_input)) {
+    mt2 <- fread(cfg$matches_input, encoding = "UTF-8")
+    if (all(c("ein", "is_match") %in% names(mt2))) {
+      matched_eins <- normalize_ein(mt2[is_match == TRUE, ein])
+      ethnic_neg   <- ethnic_neg[!ein %in% matched_eins]
+    }
+  }
+  reclass_path <- "processed_data/org_matching/panethnic_constituency_reclass.csv"
+  if (file.exists(reclass_path)) {
+    rc  <- fread(reclass_path, encoding = "UTF-8")
+    rc[, ein := normalize_ein(ein)]
+    if ("reclass_group" %in% names(rc)) {
+      pan_eins   <- rc[reclass_group %in% c("asian", "latino", "both"), ein]
+      ethnic_neg <- ethnic_neg[!ein %in% pan_eins]
+    }
+  }
+
+  if (nrow(ethnic_neg) > 0L) {
+    n_pos    <- nrow(gt)
+    n_neg    <- min(nrow(ethnic_neg), n_pos * 3L)
+    set.seed(cfg$seed)
+    eth_samp <- ethnic_neg[sample(.N, n_neg)]
+
+    pan_eth  <- rbindlist(list(
+      data.table(text = gt$text,       y_pan = 1L),
+      data.table(text = eth_samp$text, y_pan = 0L)
+    ), use.names = TRUE)
+    pan_eth[is.na(text) | text == "", text := "unknown"]
+
+    vocab_pan  <- build_vocab(pan_eth$text, min_df = cfg$min_df,
+                              max_features = cfg$max_features)
+    dtm_pan    <- build_dtm(pan_eth$text, vocab_pan)
+    X_pan      <- dtm_pan$X
+    y_pan      <- pan_eth$y_pan
+    folds_pan  <- stratified_folds(y_pan, k = cfg$folds, seed = cfg$seed)
+
+    oof_pan <- data.table(
+      row_id = seq_len(length(y_pan)), y = y_pan, fold = folds_pan,
+      p_glmnet = NA_real_, p_ranger = NA_real_, p_xgboost = NA_real_
+    )
+    for (f in seq_len(cfg$folds)) {
+      tr_p <- which(folds_pan != f); te_p <- which(folds_pan == f)
+      ytr_p <- y_pan[tr_p]
+      oof_pan[te_p, p_glmnet  := tryCatch(
+        fit_predict_glmnet(X_pan[tr_p, ], ytr_p, X_pan[te_p, ]),
+        error = function(e) rep(mean(ytr_p), length(te_p)))]
+      oof_pan[te_p, p_ranger  := tryCatch(
+        fit_predict_ranger(X_pan[tr_p, ], ytr_p, X_pan[te_p, ]),
+        error = function(e) rep(mean(ytr_p), length(te_p)))]
+      oof_pan[te_p, p_xgboost := tryCatch(
+        fit_predict_xgb(X_pan[tr_p, ],   ytr_p, X_pan[te_p, ]),
+        error = function(e) rep(mean(ytr_p), length(te_p)))]
+    }
+    oof_pan[, p_ensemble := rowMeans(.SD, na.rm = TRUE),
+            .SDcols = c("p_glmnet", "p_ranger", "p_xgboost")]
+    m_pan <- metrics_binary(oof_pan$y, oof_pan$p_ensemble)
+    m_pan[, model := "panethnic_ensemble"]
+
+    dtm_cand_pan <- build_dtm(cand$text, vocab_pan, idf = dtm_pan$idf)
+    Xc_pan       <- dtm_cand_pan$X
+    pc_pan_glm   <- tryCatch(fit_predict_glmnet(X_pan, y_pan, Xc_pan),
+                             error = function(e) rep(mean(y_pan), nrow(Xc_pan)))
+    pc_pan_rf    <- tryCatch(fit_predict_ranger(X_pan, y_pan, Xc_pan),
+                             error = function(e) rep(mean(y_pan), nrow(Xc_pan)))
+    pc_pan_xgb   <- tryCatch(fit_predict_xgb(X_pan, y_pan, Xc_pan),
+                             error = function(e) rep(mean(y_pan), nrow(Xc_pan)))
+    cand[, p_panethnic := rowMeans(
+      cbind(pc_pan_glm, pc_pan_rf, pc_pan_xgb), na.rm = TRUE)]
+    cand[, ml_label := fifelse(
+      p_panethnic >= cfg$confidence_threshold, "panethnic",
+      fifelse(p_panethnic <= (1 - cfg$confidence_threshold), "ethnic",
+              "uncertain"))]
+
+    fwrite(
+      cand[, .(ein, irs_name_raw, candidate_type, p_panethnic, ml_label)],
+      file.path(cfg$out_dir, "candidate_panethnic_predictions.csv"))
+    fwrite(m_pan, file.path(cfg$out_dir, "panethnic_classifier_cv_metrics.csv"))
+
+    message(sprintf(
+      "Panethnic classifier CV (n=%s pos=%s neg=%s): accuracy=%.3f bal_acc=%.3f macro_f1=%.3f auc=%.3f",
+      nrow(pan_eth), sum(y_pan), sum(1L - y_pan),
+      m_pan$accuracy, m_pan$balanced_accuracy, m_pan$macro_f1, m_pan$auc))
+    message(sprintf(
+      "Panethnic labels: panethnic=%s ethnic=%s uncertain=%s",
+      sum(cand$ml_label == "panethnic", na.rm = TRUE),
+      sum(cand$ml_label == "ethnic",    na.rm = TRUE),
+      sum(cand$ml_label == "uncertain", na.rm = TRUE)))
+  } else {
+    message("No ethnic_named candidates found; skipping panethnic classifier.")
+  }
+  tick("Panethnic vs. Ethnic classifier complete")
+
   # Figure: model performance comparison.
   mlong <- melt(metrics, id.vars = "model", measure.vars = c("accuracy", "macro_f1", "auc"), variable.name = "metric", value.name = "value")
   p <- ggplot(mlong, aes(x = model, y = value, fill = model)) +
@@ -398,7 +525,12 @@ main <- function() {
   tick("Outputs and performance figure saved")
   close(pb)
 
-  message(sprintf("Done. Best model: %s | Passed ML filter: %s/%s", best_model, format(sum(cand$pass_ml_filter), big.mark = ","), format(nrow(cand), big.mark = ",")))
+  message(sprintf("Done. Best group model: %s | Passed ML filter: %s/%s",
+                  best_model,
+                  format(sum(cand$pass_ml_filter), big.mark = ","),
+                  format(nrow(cand), big.mark = ",")))
+  message("Group classifier CV metrics (copy into header):")
+  print(metrics[, .(model, accuracy, balanced_accuracy, macro_f1, auc)])
 }
 
 main()

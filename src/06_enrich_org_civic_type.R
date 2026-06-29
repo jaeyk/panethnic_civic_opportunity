@@ -13,6 +13,8 @@ parse_args <- function(args) {
     irs_org_activities = "raw_data/irs_data/irs_org_activities.csv",
     irs_nonweb_activities = "raw_data/irs_data/irs_nonweb_activities.csv",
     predictions = "raw_data/web_data/predictions.csv",
+    county_classifications = "raw_data/County_Classifications.csv",
+    ml_panethnic_predictions = "processed_data/ml_validation/candidate_panethnic_predictions.csv",
     out_dir = "processed_data/org_enriched",
     include_uncertain = FALSE
   )
@@ -303,22 +305,117 @@ main <- function() {
     ) > 0
   )]
 
-  out[, org_type := fifelse(!is.na(predicted) & predicted != "", predicted,
-                     fifelse(!is.na(group_predicted) & group_predicted != "", group_predicted, irs_class))]
+  out[, org_type := fifelse(
+    !is.na(predicted) & predicted != "", predicted,
+    fifelse(!is.na(group_predicted) & group_predicted != "",
+            group_predicted, irs_class)
+  )]
+
+  # --- Naming strategy: how each org was identified ---
+  # ground_truth    : directly matched to the hand-curated org lists
+  # direct_RE       : direct panethnic keyword in IRS name
+  # indirect_RE     : ethnic name + about-page reclassified as panethnic (05)
+  # ethnic_unconfirmed: ethnic name, about-page did not confirm panethnic scope
+  # neighbor_RE     : unique_or_neighbor candidate from expanded IRS name scan
+  out[, detection_strategy := fifelse(
+    origin == "seed_match", "ground_truth",
+    fifelse(!is.na(candidate_type) & candidate_type == "direct_panethnic",
+            "direct_RE",
+    fifelse(!is.na(candidate_type) & candidate_type == "ethnic_named" &
+              !is.na(reclass_applied) & reclass_applied == 1L,
+            "indirect_RE",
+    fifelse(!is.na(candidate_type) & candidate_type == "ethnic_named",
+            "ethnic_unconfirmed",
+    "neighbor_RE")))
+  )]
+
+  # --- Detection method: RE / ML / both / ground_truth / none ---
+  # Starts as RE-only; upgraded to "both" or "ML" when 08 output is present.
+  out[, detection_method := fifelse(
+    detection_strategy %in% c("direct_RE", "indirect_RE"), "RE",
+    fifelse(detection_strategy == "ground_truth", "ground_truth", "none")
+  )]
+
+  ml_pred_path <- cfg$ml_panethnic_predictions
+  if (file.exists(ml_pred_path)) {
+    ml <- fread(ml_pred_path, encoding = "UTF-8")
+    ml[, ein := normalize_ein(ein)]
+    ml <- unique(ml[, .(ein, p_panethnic, ml_label)], by = "ein")
+    for (col in c("p_panethnic", "ml_label")) {
+      if (col %in% names(out)) out[, (col) := NULL]
+    }
+    out <- merge(out, ml, by = "ein", all.x = TRUE)
+    out[!is.na(ml_label) & ml_label == "panethnic" &
+          detection_method == "RE",  detection_method := "both"]
+    out[!is.na(ml_label) & ml_label == "panethnic" &
+          detection_method == "none", detection_method := "ML"]
+  } else {
+    if (!"p_panethnic" %in% names(out)) out[, p_panethnic := NA_real_]
+    if (!"ml_label"    %in% names(out)) out[, ml_label    := NA_character_]
+  }
+
+  # --- Urbanicity from USDA Rural-Urban Continuum Code 2013 ---
+  # Code 1 = large metro (urban), 2-3 = smaller metro (suburban), 4-9 = rural
+  if (file.exists(cfg$county_classifications) &&
+        "irs_county_fips" %in% names(out)) {
+    cc <- fread(cfg$county_classifications, encoding = "UTF-8",
+                select = c("FIPStxt", "RuralUrbanContinuumCode2013"))
+    cc[, irs_county_fips := normalize_fips(FIPStxt)]
+    cc[, urbanicity := fifelse(
+      RuralUrbanContinuumCode2013 == 1L, "urban",
+      fifelse(RuralUrbanContinuumCode2013 %in% 2:3, "suburban", "rural")
+    )]
+    if ("urbanicity" %in% names(out)) out[, urbanicity := NULL]
+    out <- merge(out, cc[, .(irs_county_fips, urbanicity)],
+                 by = "irs_county_fips", all.x = TRUE)
+  } else {
+    if (!"urbanicity" %in% names(out)) out[, urbanicity := NA_character_]
+  }
+
+  # --- Sort: panethnic group → detection strategy → org type ---
+  group_lvls <- c("asian", "latino", "both", "uncertain")
+  strat_lvls <- c("ground_truth", "direct_RE", "indirect_RE",
+                  "ethnic_unconfirmed", "neighbor_RE")
+  type_lvls  <- c("arts", "civic", "community", "econ", "education",
+                  "foundations", "health", "hobby", "housing",
+                  "professional", "religious", "research",
+                  "socialfraternal", "unions", "youth")
+  out[, .pg := factor(panethnic_group,    levels = group_lvls)]
+  out[, .st := factor(detection_strategy, levels = strat_lvls)]
+  out[, .ot := factor(org_type,           levels = type_lvls)]
+  setorder(out, .pg, .st, .ot, na.last = TRUE)
+  out[, c(".pg", ".st", ".ot") := NULL]
+
+  # --- Counts by naming strategy, group, and org type ---
+  strategy_counts <- out[, .(n_orgs = .N),
+    by = .(panethnic_group, detection_strategy, detection_method, org_type)]
+  setorder(strategy_counts, panethnic_group, detection_strategy, org_type)
+
+  strategy_totals <- out[, .(
+    n_orgs   = .N,
+    n_asian  = sum(panethnic_group == "asian",  na.rm = TRUE),
+    n_latino = sum(panethnic_group == "latino", na.rm = TRUE),
+    n_both   = sum(panethnic_group == "both",   na.rm = TRUE)
+  ), by = .(detection_strategy, detection_method)]
+  setorder(strategy_totals, detection_strategy)
 
   summary_by_group <- out[, .(
-    org_n = uniqueN(ein),
-    civic_any_rate = round(mean(civic_any, na.rm = TRUE), 4),
-    membership_rate = round(mean(membership_final, na.rm = TRUE), 4),
-    volunteer_rate = round(mean(volunteer_final, na.rm = TRUE), 4),
-    events_rate = round(mean(events_final, na.rm = TRUE), 4),
+    org_n             = uniqueN(ein),
+    civic_any_rate    = round(mean(civic_any,          na.rm = TRUE), 4),
+    membership_rate   = round(mean(membership_final,   na.rm = TRUE), 4),
+    volunteer_rate    = round(mean(volunteer_final,    na.rm = TRUE), 4),
+    events_rate       = round(mean(events_final,       na.rm = TRUE), 4),
     civic_action_rate = round(mean(civic_action_final, na.rm = TRUE), 4)
-  ), by = .(panethnic_group, origin)]
+  ), by = .(panethnic_group, detection_strategy, detection_method)]
 
-  fwrite(out, file.path(cfg$out_dir, "org_civic_enriched.csv"))
+  fwrite(out,              file.path(cfg$out_dir, "org_civic_enriched.csv"))
+  fwrite(strategy_counts,  file.path(cfg$out_dir, "org_strategy_counts.csv"))
+  fwrite(strategy_totals,  file.path(cfg$out_dir, "org_strategy_totals.csv"))
   fwrite(summary_by_group, file.path(cfg$out_dir, "org_civic_enriched_summary.csv"))
 
   message(sprintf("Done. Enriched rows: %s", format(nrow(out), big.mark = ",")))
+  message("Strategy totals (n_orgs by detection_strategy x detection_method):")
+  print(strategy_totals)
 }
 
 main()
