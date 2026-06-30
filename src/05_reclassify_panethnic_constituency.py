@@ -112,6 +112,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min_similarity", type=float, default=0.40)
     p.add_argument("--model_name", type=str, default="all-MiniLM-L6-v2")
     p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument(
+        "--sample_evidence_n", type=int, default=0,
+        help=(
+            "If > 0, draw a random sample of this many reclassified orgs and "
+            "write their top evidence sentence to --sample_evidence_output for "
+            "manual quality review. Default 0 (disabled)."
+        ),
+    )
+    p.add_argument(
+        "--sample_evidence_output",
+        default="processed_data/verification/reclassification_audit_sample.csv",
+    )
     return p.parse_args()
 
 
@@ -362,6 +374,25 @@ def main() -> None:
     kept = sum(1 for r in reclass_rows if r["reclass_group"] in {"asian", "latino", "both"})
     print(f"Wrote {args.out_file} ({total} rows; {kept} upgraded)")
     print(f"Wrote {args.evidence_file} ({len(evidence_rows)} sentence evidence rows)")
+
+    # Optional random audit sample of reclassified orgs.
+    if args.sample_evidence_n > 0:
+        import random
+        upgraded = [r for r in reclass_rows if r["reclass_group"] in {"asian", "latino", "both"}]
+        k = min(args.sample_evidence_n, len(upgraded))
+        sample = random.sample(upgraded, k)
+        sample.sort(key=lambda r: r["irs_name_raw"])
+        os.makedirs(os.path.dirname(args.sample_evidence_output) or ".", exist_ok=True)
+        sample_fields = [
+            "ein", "irs_name_raw", "reclass_group",
+            "reclass_confidence", "reclass_evidence_sentence",
+            "asian_similarity", "latino_similarity",
+        ]
+        with open(args.sample_evidence_output, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=sample_fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(sample)
+        print(f"Wrote audit sample ({k} orgs) → {args.sample_evidence_output}")
 
 
 if __name__ == "__main__":

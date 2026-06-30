@@ -17,57 +17,63 @@ library(jsonlite)
 library(scales)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ORG_FILE  <- "processed_data/org_enriched/org_civic_enriched.csv"
-POP_FILE  <- "processed_data/population/census_county_2020_pl_total_asian_latino.json"
+ORG_FILE <- "processed_data/org_enriched/org_civic_enriched.csv"
+POP_FILE <- "processed_data/population/census_county_2020_pl_total_asian_latino.json"
 RUCC_FILE <- "raw_data/County_Classifications.csv"
-OUT_FIG   <- "outputs/figures/population_org_urbanicity_mismatch.png"
+OUT_FIG <- "outputs/figures/population_org_urbanicity_mismatch.png"
 OUT_TABLE <- "outputs/analysis/population_org_urbanicity_mismatch.csv"
 
 # ── Urbanicity classification (same rules as org_civic_enriched) ──────────────
 rucc_to_urban <- function(rucc) {
   fcase(
-    rucc == 1,          "Urban",
+    rucc == 1, "Urban",
     rucc %in% c(2, 3), "Suburban",
-    rucc >= 4,          "Rural"
+    rucc >= 4, "Rural"
   )
 }
 
 URBAN_LEVELS <- c("Urban", "Suburban", "Rural")
 
 # ── 1. Population by urbanicity (2020 Census + RUCC) ─────────────────────────
-j     <- fromJSON(POP_FILE)
-pop   <- as.data.table(j[-1, ]); setnames(pop, j[1, ])
-pop[, fips   := as.integer(paste0(state, county))]
-pop[, asian  := as.numeric(P1_006N)]
+j <- fromJSON(POP_FILE)
+pop <- as.data.table(j[-1, ])
+setnames(pop, j[1, ])
+pop[, fips := as.integer(paste0(state, county))]
+pop[, asian := as.numeric(P1_006N)]
 pop[, latino := as.numeric(P2_002N)]
-pop   <- pop[, .(fips, asian, latino)]
+pop <- pop[, .(fips, asian, latino)]
 
-rucc  <- fread(RUCC_FILE)[, .(fips = FIPStxt, rucc = RuralUrbanContinuumCode2013)]
-pop   <- merge(pop, rucc, by = "fips", all.x = TRUE)
+rucc <- fread(RUCC_FILE)[, .(fips = FIPStxt, rucc = RuralUrbanContinuumCode2013)]
+pop <- merge(pop, rucc, by = "fips", all.x = TRUE)
 pop[, urbanicity := rucc_to_urban(rucc)]
-pop   <- pop[!is.na(urbanicity)]
+pop <- pop[!is.na(urbanicity)]
 
-pop_by_urban <- pop[, .(asian = sum(asian, na.rm = TRUE),
-                         latino = sum(latino, na.rm = TRUE)),
-                    by = urbanicity]
-pop_by_urban[, asian_share  := asian  / sum(asian)]
+pop_by_urban <- pop[, .(
+  asian = sum(asian, na.rm = TRUE),
+  latino = sum(latino, na.rm = TRUE)
+),
+by = urbanicity
+]
+pop_by_urban[, asian_share := asian / sum(asian)]
 pop_by_urban[, latino_share := latino / sum(latino)]
 
 # Reshape to long
 pop_long <- rbind(
   pop_by_urban[, .(urbanicity, group = "Asian American", pop_share = asian_share)],
-  pop_by_urban[, .(urbanicity, group = "Latino",         pop_share = latino_share)]
+  pop_by_urban[, .(urbanicity, group = "Latino", pop_share = latino_share)]
 )
 
 # ── 2. Org share by urbanicity (panethnic only) ────────────────────────────────
 orgs <- fread(ORG_FILE)
-pan  <- orgs[
-  detection_strategy %in% c("direct_RE", "indirect_RE", "ground_truth") &
+pan <- orgs[
+  detection_method %in% c("both", "RE", "ML", "ground_truth") &
     panethnic_group %in% c("asian", "latino") &
     urbanicity %in% c("urban", "suburban", "rural")
 ]
-pan[, urbanicity  := fifelse(urbanicity == "urban", "Urban",
-                    fifelse(urbanicity == "suburban", "Suburban", "Rural"))]
+pan[, urbanicity := fifelse(
+  urbanicity == "urban", "Urban",
+  fifelse(urbanicity == "suburban", "Suburban", "Rural")
+)]
 pan[, group_label := fifelse(panethnic_group == "asian", "Asian American", "Latino")]
 
 org_totals <- pan[, .N, by = .(group_label, urbanicity)]
@@ -86,17 +92,19 @@ civ_by_urban <- pan[, .(
   n         = .N
 ), by = .(group_label, urbanicity)]
 setnames(civ_by_urban, "group_label", "group")
-civ_by_urban[, group      := factor(group, levels = c("Asian American", "Latino"))]
+civ_by_urban[, group := factor(group, levels = c("Asian American", "Latino"))]
 civ_by_urban[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
 
 # ── 4. Merge and tidy ─────────────────────────────────────────────────────────
 dumbbell <- merge(pop_long, org_totals[, .(group, urbanicity, org_share)],
-                  by = c("group", "urbanicity"))
+  by = c("group", "urbanicity")
+)
 dumbbell[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
-dumbbell[, group      := factor(group, levels = c("Asian American", "Latino"))]
+dumbbell[, group := factor(group, levels = c("Asian American", "Latino"))]
 
 fwrite(merge(dumbbell, civ_by_urban[, .(group, urbanicity, civ_index)],
-             by = c("group", "urbanicity")), OUT_TABLE)
+  by = c("group", "urbanicity")
+), OUT_TABLE)
 cat("Table saved:", OUT_TABLE, "\n")
 
 # ── 5. Build plot ─────────────────────────────────────────────────────────────
@@ -119,12 +127,18 @@ p_dumb <- ggplot(dumbbell, aes(y = urbanicity)) +
     aes(x = share, shape = measure, fill = measure),
     size = 4, color = "grey20", stroke = 1.2
   ) +
-  scale_shape_manual(values = c("Population" = 21, "Organizations" = 16),
-                     name = NULL) +
-  scale_fill_manual(values  = c("Population" = "white", "Organizations" = "grey20"),
-                    name = NULL) +
-  scale_x_continuous(labels = percent_format(accuracy = 1),
-                     limits = c(0, 1), expand = expansion(mult = c(0.02, 0.05))) +
+  scale_shape_manual(
+    values = c("Population" = 21, "Organizations" = 16),
+    name = NULL
+  ) +
+  scale_fill_manual(
+    values = c("Population" = "white", "Organizations" = "grey20"),
+    name = NULL
+  ) +
+  scale_x_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1), expand = expansion(mult = c(0.02, 0.05))
+  ) +
   scale_y_discrete(limits = rev(URBAN_LEVELS)) +
   facet_wrap(~group, ncol = 1) +
   labs(
@@ -148,9 +162,12 @@ p_dumb <- ggplot(dumbbell, aes(y = urbanicity)) +
 p_civ <- ggplot(civ_by_urban, aes(x = civ_index, y = urbanicity)) +
   geom_col(fill = "grey40", width = 0.55) +
   geom_text(aes(label = sprintf("%.2f", civ_index)),
-            hjust = -0.15, size = 3.8, color = "grey20") +
-  scale_x_continuous(limits = c(0, 0.55),
-                     expand = expansion(mult = c(0.02, 0.05))) +
+    hjust = -0.15, size = 3.8, color = "grey20"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 0.55),
+    expand = expansion(mult = c(0.02, 0.05))
+  ) +
   scale_y_discrete(limits = rev(URBAN_LEVELS)) +
   facet_wrap(~group, ncol = 1) +
   labs(
@@ -175,18 +192,19 @@ library(patchwork)
 p_combined <- p_dumb + p_civ +
   plot_layout(widths = c(1.6, 1)) +
   plot_annotation(
-    title    = "Panethnic organizations and civic opportunity are more urban than the populations they serve",
-    subtitle = "Panethnic Asian American and Latino organizations only",
+    title    = "Panethnic organizations are more urban than the populations they serve",
     caption  = paste0(
       "Urbanicity defined by USDA Rural-Urban Continuum Codes (RUCC 2013): ",
       "Urban = RUCC 1 (large metro); Suburban = RUCC 2–3 (smaller metro); Rural = RUCC 4–9 (non-metro).\n",
       "Civic opportunity index = average of membership, volunteering, events, and civic and political action indicators."
     ),
     theme = theme(
-      plot.title    = element_text(face = "bold", size = 15),
+      plot.title = element_text(face = "bold", size = 15),
       plot.subtitle = element_text(size = 12),
-      plot.caption  = element_text(size = 9, color = "grey30", hjust = 0,
-                                   margin = margin(t = 6))
+      plot.caption = element_text(
+        size = 9, color = "grey30", hjust = 0,
+        margin = margin(t = 6)
+      )
     )
   )
 
@@ -195,8 +213,11 @@ cat("Figure saved:", OUT_FIG, "\n")
 
 cat("\nSummary table:\n")
 print(merge(dumbbell, civ_by_urban[, .(group, urbanicity, civ_index)],
-            by = c("group", "urbanicity"))[
+  by = c("group", "urbanicity")
+)[
   order(group, urbanicity),
-  .(group, urbanicity, pop_share = round(pop_share, 3),
-    org_share = round(org_share, 3), civ_index = round(civ_index, 3))
+  .(group, urbanicity,
+    pop_share = round(pop_share, 3),
+    org_share = round(org_share, 3), civ_index = round(civ_index, 3)
+  )
 ])

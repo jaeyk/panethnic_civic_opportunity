@@ -408,6 +408,56 @@ main <- function() {
     civic_action_rate = round(mean(civic_action_final, na.rm = TRUE), 4)
   ), by = .(panethnic_group, detection_strategy, detection_method)]
 
+  # --- V5: Duplicate EIN audit ---
+  # An EIN appearing in multiple source origins is expected (e.g., an org matched
+  # from the ground-truth list AND picked up by the direct-panethnic name scan).
+  # Downstream analyses that count orgs by EIN should be aware of these duplicates.
+  ein_counts <- out[, .N, by = ein]
+  dup_eins <- ein_counts[N > 1L, ein]
+  if (length(dup_eins) > 0L) {
+    dup_tbl <- out[ein %in% dup_eins,
+                   .(ein, irs_name_raw, origin, detection_strategy, panethnic_group)]
+    setorder(dup_tbl, ein, origin)
+    message(sprintf(
+      "V5 Duplicate EIN audit: %s EINs appear in multiple source origins. See duplicate_ein_audit.csv.",
+      format(length(dup_eins), big.mark = ",")
+    ))
+    fwrite(dup_tbl, file.path(cfg$out_dir, "duplicate_ein_audit.csv"))
+  } else {
+    message("V5 Duplicate EIN audit: PASS — all EINs are unique across origins.")
+  }
+
+  # --- V6: RE vs. ML disagreement audit ---
+  # Flags cases where the rule-based strategy (RE) and the ML prediction diverge.
+  # Type A: RE classifies as panethnic (direct_RE or indirect_RE) but ML says ethnic.
+  # Type B: RE does not classify as panethnic but ML says panethnic.
+  # Disagreements are not errors — RE and ML are complementary — but they identify
+  # cases worth reviewing when validating coverage decisions.
+  if ("ml_label" %in% names(out) && !all(is.na(out$ml_label))) {
+    disagree <- out[
+      (detection_strategy %in% c("direct_RE", "indirect_RE") & ml_label == "ethnic") |
+      (detection_strategy %in% c("ethnic_unconfirmed", "neighbor_RE") & ml_label == "panethnic")
+    ]
+    if (nrow(disagree) > 0L) {
+      disagree_out <- disagree[, .(
+        ein, irs_name_raw, detection_strategy, detection_method,
+        ml_label, p_panethnic, panethnic_group
+      )]
+      setorder(disagree_out, detection_strategy, ml_label)
+      message(sprintf(
+        "V6 RE vs. ML disagreements: %s rows (%s RE-panethnic/ML-ethnic; %s RE-other/ML-panethnic). See re_ml_disagreements.csv.",
+        nrow(disagree),
+        sum(disagree$detection_strategy %in% c("direct_RE", "indirect_RE") & disagree$ml_label == "ethnic", na.rm = TRUE),
+        sum(disagree$detection_strategy %in% c("ethnic_unconfirmed", "neighbor_RE") & disagree$ml_label == "panethnic", na.rm = TRUE)
+      ))
+      fwrite(disagree_out, file.path(cfg$out_dir, "re_ml_disagreements.csv"))
+    } else {
+      message("V6 RE vs. ML disagreement audit: no conflicts found.")
+    }
+  } else {
+    message("V6 RE vs. ML disagreement audit: skipped (ml_label not available; run step 08 first).")
+  }
+
   fwrite(out,              file.path(cfg$out_dir, "org_civic_enriched.csv"))
   fwrite(strategy_counts,  file.path(cfg$out_dir, "org_strategy_counts.csv"))
   fwrite(strategy_totals,  file.path(cfg$out_dir, "org_strategy_totals.csv"))

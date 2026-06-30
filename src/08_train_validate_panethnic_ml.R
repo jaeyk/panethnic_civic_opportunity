@@ -479,6 +479,21 @@ main <- function() {
     m_pan <- metrics_binary(oof_pan$y, oof_pan$p_ensemble)
     m_pan[, model := "panethnic_ensemble"]
 
+    # V7: Per-fold stability metrics for the panethnic ensemble.
+    # Fold-level variance reveals whether performance degrades on particular
+    # subsets (e.g., folds with different Asian/Latino mix or less about-page text).
+    fold_pan_metrics <- rbindlist(lapply(seq_len(cfg$folds), function(f) {
+      sub <- oof_pan[fold == f]
+      m   <- metrics_binary(sub$y, sub$p_ensemble)
+      m[, fold        := f]
+      m[, n_test      := nrow(sub)]
+      m[, n_pos_test  := sum(sub$y)]
+      m[, n_neg_test  := sum(1L - sub$y)]
+      m
+    }))
+    setcolorder(fold_pan_metrics, c("fold", "n_test", "n_pos_test", "n_neg_test",
+                                    "accuracy", "balanced_accuracy", "macro_f1", "auc", "log_loss"))
+
     dtm_cand_pan <- build_dtm(cand$text, vocab_pan, idf = dtm_pan$idf)
     Xc_pan       <- dtm_cand_pan$X
     pc_pan_glm   <- tryCatch(fit_predict_glmnet(X_pan, y_pan, Xc_pan),
@@ -498,6 +513,9 @@ main <- function() {
       cand[, .(ein, irs_name_raw, candidate_type, p_panethnic, ml_label)],
       file.path(cfg$out_dir, "candidate_panethnic_predictions.csv"))
     fwrite(m_pan, file.path(cfg$out_dir, "panethnic_classifier_cv_metrics.csv"))
+    fwrite(fold_pan_metrics, file.path(cfg$out_dir, "panethnic_classifier_fold_metrics.csv"))
+    message("V7 Per-fold panethnic classifier stability:")
+    print(fold_pan_metrics[, .(fold, n_test, n_pos_test, accuracy, balanced_accuracy, macro_f1, auc)])
 
     message(sprintf(
       "Panethnic classifier CV (n=%s pos=%s neg=%s): accuracy=%.3f bal_acc=%.3f macro_f1=%.3f auc=%.3f",

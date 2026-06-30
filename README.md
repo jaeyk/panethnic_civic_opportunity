@@ -33,29 +33,47 @@ Method documentation:
 
 We construct the universe of Asian American and Latino organizations from IRS Exempt Organization (EO) Business Master File (BMF) records combined with web-scraped organizational self-descriptions. The IRS BMF provides registered names, employer identification numbers (EINs), incorporation years, and activity codes for all 501(c)-registered nonprofits in the United States. To identify Asian American and Latino organizations, we apply two complementary naming strategies. First, we flag organizations whose IRS-registered name contains direct panethnic keywords (e.g., *Asian American*, *AAPI*, *Latino*, *Hispanic*), yielding a *direct naming* set. Second, we flag organizations whose name contains ethnic subgroup keywords (e.g., *Chinese*, *Korean*, *Vietnamese*, *Mexican*) as *ethnic-named* candidates, recognizing that many organizations serving panethnic communities adopted subgroup-specific names.
 
-To validate and expand classifications beyond naming rules, we scrape the about-page text of each candidate organization's website. We match a hand-curated ground truth of 818 Asian American and Latino advocacy and community-based organizations to IRS records using probabilistic name linkage (bipartite blocking-and-matching; match rate 82.0%). For ethnic-named candidates with scraped text, we apply a sentence-transformer model (`all-MiniLM-L6-v2`) to score every sentence in each organization's about-page against panethnic constituency prototype sentences. An organization is reclassified from *ethnic-named* to *panethnic* when its about-page explicitly describes panethnic service scope (e.g., a Chinese organization stating it serves Asian Americans broadly), clearing both a composite score threshold (≥ 0.40) and a raw cosine similarity threshold (≥ 0.40). Before reclassification, we apply a URL ownership verification step that nullifies about-page text for confirmed URL mismatches — cases where the scraped page belongs to a different organization entirely — as well as IRS-self-reported URL domain conflicts and bot-blocked or spam-contaminated pages. This verification step reduces reclassifications from 212 to 178 (2.1% of 8,473 ethnic-named candidates), yielding a final panethnic count of 3,304 organizations (1,259 Asian American; 2,012 Latino; 33 both).
+To validate and expand classifications beyond naming rules, we scrape the about-page text of each candidate organization's website. We match a hand-curated ground truth of 818 Asian American and Latino advocacy and community-based organizations to IRS records using probabilistic name linkage (bipartite blocking-and-matching; match rate 82.0%). For ethnic-named candidates with scraped text, we apply a sentence-transformer model (`all-MiniLM-L6-v2`) to score every sentence in each organization's about-page against panethnic constituency prototype sentences. An organization is reclassified from *ethnic-named* to *panethnic* when its about-page explicitly describes panethnic service scope (e.g., a Chinese organization stating it serves Asian Americans broadly), clearing both a composite score threshold (≥ 0.45) and a raw cosine similarity threshold (≥ 0.40). Before reclassification, we apply a URL ownership verification step that nullifies about-page text for confirmed URL mismatches — cases where the scraped page belongs to a different organization entirely — as well as IRS-self-reported URL domain conflicts and bot-blocked or spam-contaminated pages. This verification step reduces reclassifications from 212 to 178 (2.1% of 8,473 ethnic-named candidates), yielding a final panethnic count of 3,304 organizations (1,259 Asian American; 2,012 Latino; 33 both).
 
 We validate panethnic classifications using two supervised machine learning tasks trained on the ground-truth set. A group classifier (XGBoost, 5-fold CV accuracy: 96.5%, AUC: 0.996) distinguishes Asian American from Latino organizations across the full candidate set. A panethnic-vs-ethnic classifier (ensemble of lasso, random forest, and XGBoost; 5-fold CV accuracy: 96.6%, AUC: 0.992) distinguishes panethnic organizations from unconfirmed ethnic-named candidates. Organizational types are assigned using a rule-based classifier applied to IRS name tokens and activity codes, producing 15 categories (civic/political, religious, professional, economic, arts and cultural, community, healthcare, housing, education, research, foundations, hobby and sports, social and fraternal, youth, unions); classifier accuracy is 97.6% (macro-F1: 98.6%) against a held-out ground-truth set.
 
-**Figure 1 — Org-type composition flow (`orgtype_flow_great_society_vs_reagan.png`)** compares the organizational type composition of panethnic organizations across two eras defined by IRS incorporation year: the 1960s–1970s (n = 131 Asian American; n = 175 Latino) and Post-1981 (n = 864 Asian American; n = 1,269 Latino). For each group, we compute the proportion of organizations in each type within each period and render the shifts as sigmoid Bézier ribbons. Types that declined in share after 1981 are stacked at the top of each bar (dark grey) and types that increased are stacked at the bottom (light grey), allowing the aggregate recomposition to be read directly from the area of each shaded region.
+**Figure 1 — Org-type composition flow (`orgtype_flow_great_society_vs_reagan.png`)** compares the organizational type composition of panethnic organizations across two eras defined by IRS incorporation year: the 1960s–1970s (n = 131 Asian American; n = 176 Latino) and Post-1981 (n = 868 Asian American; n = 1,271 Latino). Panethnic organizations are those flagged by the rule-based naming rules, the ML panethnic classifier, or both — plus ground-truth-matched organizations (`detection_method ∈ RE, both, ML, ground_truth`). This union-of-methods approach retains RE-detected organizations regardless of ML confirmation, which is important because many genuine panethnic organizations lack sufficient about-page text for the classifier to evaluate; requiring ML confirmation would introduce selection bias toward organizations with a web presence. For each group, we compute the proportion of organizations in each type within each period and render the shifts as sigmoid Bézier ribbons. Types that declined in share after 1981 are stacked at the top of each bar (dark grey) and types that increased are stacked at the bottom (light grey), allowing the aggregate recomposition to be read directly from the area of each shaded region.
 
-**Figure 2 — Population vs. organizational presence by urbanicity (`population_org_urbanicity_mismatch.png`)** shows the mismatch between where the Asian American and Latino populations live and where panethnic organizations and civic opportunity are concentrated. For each group, we compare the population share by urbanicity tier (2020 Census county-level counts joined to USDA Rural-Urban Continuum Codes) against the organizational share by urbanicity tier (from `org_civic_enriched.csv`). Urbanicity is defined as: Urban (RUCC 1), Suburban (RUCC 2–3), and Rural (RUCC 4–9), consistent with the classification in `org_civic_enriched.csv`. A civic opportunity index — the average of four binary indicators (membership, volunteering, events, and civic and political action) from IRS activity records — is shown alongside to indicate the quality of civic infrastructure available by place type.
+**Figure 2 — Population vs. organizational presence by urbanicity (`population_org_urbanicity_mismatch.png`)** shows the mismatch between where the Asian American and Latino populations live and where panethnic organizations and civic opportunity are concentrated. For each group, we compare the population share by urbanicity tier (2020 Census county-level counts joined to USDA Rural-Urban Continuum Codes) against the organizational share by urbanicity tier among panethnic organizations flagged by the naming rules, the ML classifier, or both — plus ground-truth matches (`detection_method ∈ RE, both, ML, ground_truth`). This union-of-methods approach mirrors Figure 1 and retains RE-detected organizations regardless of ML confirmation, preserving orgs without sufficient about-page text for ML evaluation. Urbanicity is defined as: Urban (RUCC 1), Suburban (RUCC 2–3), and Rural (RUCC 4–9), consistent with the classification in `org_civic_enriched.csv`. A civic opportunity index — the average of four binary indicators (membership, volunteering, events, and civic and political action) from IRS activity records — is shown alongside to indicate the quality of civic infrastructure available by place type.
 
-  **Asian American** (n orgs: Urban 1,094; Suburban 134; Rural 20):
+  **Asian American** (n orgs: Urban 1,098; Suburban 134; Rural 20):
 
   | Urbanicity | Population share | Org share | Civic opp. index |
   | --- | ---: | ---: | ---: |
-  | Urban    | 80.1% | 87.7% | 0.31 |
+  | Urban | 80.1% | 87.7% | 0.31 |
   | Suburban | 17.6% | 10.7% | 0.25 |
-  | Rural    |  2.2% |  1.6% | 0.11 |
+  | Rural | 2.2% | 1.6% | 0.11 |
 
-  **Latino** (n orgs: Urban 1,454; Suburban 478; Rural 73):
+  **Latino** (n orgs: Urban 1,457; Suburban 478; Rural 73):
 
   | Urbanicity | Population share | Org share | Civic opp. index |
   | --- | ---: | ---: | ---: |
-  | Urban    | 66.4% | 72.5% | 0.24 |
+  | Urban | 66.4% | 72.5% | 0.24 |
   | Suburban | 27.1% | 23.8% | 0.24 |
-  | Rural    |  6.6% |  3.6% | 0.14 |
+  | Rural | 6.6% | 3.6% | 0.14 |
+
+### Limitations
+
+*IRS BMF coverage.* The analysis is restricted to 501(c)-registered nonprofits. Informal mutual aid networks, unincorporated community-based organizations, religious congregations without a separate EIN, and organizations operating under a fiscal sponsor all lack their own IRS registration and are excluded. This likely understates civic infrastructure in communities with newer or more informal organizing traditions, where formal nonprofit incorporation may lag behind organizational activity.
+
+*Match gap (18%).* The probabilistic name match achieves 82.0% against the 818 ground-truth orgs (target: 90%). The 18% unmatched orgs are not random — failure modes cluster around organizations with unconventional or non-English names, recent name changes, and state-level registration irregularities. The extent to which unmatched orgs differ systematically from matched orgs in type, size, or geographic concentration is an unresolved validity threat.
+
+*URL and scraping coverage.* Only approximately 16% of ethnic-named candidates have IRS self-reported URLs; the remainder rely on inferred crawl links. Step `04c` verifies confirmed mismatches but cannot detect false negatives — cases where the inferred URL is wrong but the resulting page text is topically neutral rather than junk or conflicting. The true URL error rate for un-flagged rows is unknown. Additionally, a substantial fraction of ethnic-named candidates lack any usable about-page text and are silently excluded from reclassification (see `src/verify_scrape_quality.py`). If these organizations are disproportionately older, smaller, or less digitally present, the analysis underestimates the number of ethnic-named organizations with panethnic service scope.
+
+*Sentence-transformer thresholds.* The `min_score` (default 0.45) and `min_similarity` (default 0.40) thresholds were set empirically. `all-MiniLM-L6-v2` is a general-purpose model not fine-tuned on nonprofit or advocacy language. Reclassification counts are sensitive to threshold choice (see `src/verify_threshold_sensitivity.py` for a sensitivity table across threshold combinations), and a formal precision/recall evaluation against a labeled holdout of ethnic-named organizations is not available.
+
+*IRS incorporation year as founding year.* `fnd_yr` captures when an organization registered with the IRS, not when it began operating. Many organizations work informally for years before incorporating; mergers and reincorporations can create apparent discontinuities in the founding-year time series. Era-based comparisons (1960s–70s vs. post-1981) should be interpreted with the understanding that the IRS registration year may lag actual founding by an unknown duration.
+
+*IRS activity codes as civic opportunity.* The civic opportunity index aggregates four binary IRS self-reported activity fields (membership, volunteering, events, civic and political action). These fields are completed on Form 990 and reflect organizational self-reporting, not independent verification of programs delivered. The index is unweighted and treats a small volunteer program as equivalent to a large electoral mobilization infrastructure.
+
+*Urbanicity is county of IRS registration, not county of service.* The RUCC-based urbanicity classification uses the county where the IRS mailing address is registered. Many organizations — particularly regional advocacy coalitions — serve constituencies across multiple urbanicity tiers. The urban concentration shown in Figure 2 may overstate the geographic mismatch to the extent that urban-registered organizations serve suburban and rural communities.
+
+*Static 2020 Census population.* The population share denominators in Figure 2 use 2020 Census county-level counts, while the organizational data spans incorporation years from the 1960s onward. Comparing a single-year population snapshot to the full historical stock of organizations conflates different time periods; ideally, population shares would be matched to the cohort year of each organization's founding.
 
 ## Org identification strategy
 
@@ -78,17 +96,18 @@ appear as `indirect_RE` in `detection_strategy`.
 Reclassification uses `sentence-transformers` (`all-MiniLM-L6-v2`) to compute
 cosine similarity between each about-page sentence and panethnic prototype
 sentences. A sentence must clear both a composite score threshold (`--min_score`,
-default 0.40) and a raw similarity threshold (`--min_similarity`, default 0.40)
+default 0.45) and a raw similarity threshold (`--min_similarity`, default 0.40)
 to trigger an upgrade. All sentences in the page are scanned (no cap).
 
-Reclassification results (current run, `min_score=0.40`, `min_similarity=0.40`):
+Reclassification results (historical runs; current code defaults: `min_score=0.45`, `min_similarity=0.40`):
 
 | Step | Upgraded | Rate | Notes |
 | --- | --- | --- | --- |
 | Original (hash embedding, ≤30 sentences, score ≥ 0.52) | 131 | 2.1% | baseline |
 | Real embeddings (`all-MiniLM-L6-v2`), score ≥ 0.45 | 182 | 3.6% | +51 |
 | Lower threshold (score ≥ 0.40) | 212 | 4.1% | +30 |
-| + URL ownership verification (04c) | **178** | **2.1%** | −34 |
+| + URL ownership verification (04c), score ≥ 0.40 | 178 | 2.1% | −34 |
+| **Current: score ≥ 0.45 + URL verification (pre-applied)** | **178** | **2.1%** | same orgs |
 
 The −34 from adding URL verification breaks down as: 5 confirmed URL mismatches (IRS linked wrong website), 2 self-reported IRS URL domain mismatches, and 32 blocked/bot-challenged pages whose partial text was removed.
 
@@ -112,17 +131,17 @@ Each org also carries a `detection_method` field:
 - `both` — both RE and ML confirm panethnic classification (higher confidence)
 - `ground_truth` — directly matched from the hand-curated org lists
 
-**Strategy counts from the most recent run (2026-06-26):**
+**Strategy counts from the most recent run (2026-06-29):**
 
 | detection_strategy   | detection_method | n_orgs | n_asian | n_latino |
 |----------------------|------------------|-------:|--------:|---------:|
 | ground_truth         | ground_truth     |    640 |     242 |      398 |
 | direct_RE            | both             |  1,241 |     466 |      768 |
 | direct_RE            | RE               |  1,254 |     426 |      803 |
-| indirect_RE          | both             |     14 |      12 |        2 |
-| indirect_RE          | RE               |    117 |      87 |       30 |
-| ethnic_unconfirmed   | ML               |      8 |       2 |        6 |
-| ethnic_unconfirmed   | none             |  8,334 |   7,252 |    1,028 |
+| indirect_RE          | both             |     15 |       9 |        5 |
+| indirect_RE          | RE               |    154 |     116 |       38 |
+| ethnic_unconfirmed   | ML               |      7 |       4 |        3 |
+| ethnic_unconfirmed   | none             |  8,297 |   7,224 |    1,017 |
 | neighbor_RE          | none             |  1,094 |     138 |      956 |
 
 Three key covariates are present in `org_civic_enriched.csv`:
@@ -298,9 +317,9 @@ Phase 06: Visualization and communication
   - script: `src/visualize_orgtype_flow_by_era.R`
   - output figure: `outputs/figures/orgtype_flow_great_society_vs_reagan.png`
   - output table: `outputs/analysis/orgtype_flow_great_society_vs_reagan.csv`
-  - scope: panethnic orgs only (`detection_strategy` ∈ `direct_RE`, `indirect_RE`, `ground_truth`); period defined by IRS incorporation year (`fnd_yr`)
+  - scope: panethnic orgs identified by naming rules, ML classifier, or both — plus ground-truth matches (`detection_method` ∈ `RE`, `both`, `ML`, `ground_truth`); period defined by IRS incorporation year (`fnd_yr`)
   - design: alluvial flow plot with decreasing types (dark grey) stacked at top, increasing types (light grey) at bottom; black lines separate each flow
-  - sample sizes: Asian 1960s–70s n=131, Post-1981 n=864; Latino 1960s–70s n=175, Post-1981 n=1,269
+  - sample sizes: Asian 1960s–70s n=131, Post-1981 n=868; Latino 1960s–70s n=176, Post-1981 n=1,271
   - **Asian American proportion shifts** (1960s–70s → Post-1981, percentage points):
 
     | Org type | 1960s–70s | Post-1981 | Change (pp) |
@@ -345,14 +364,14 @@ Current focus figures:
   - script: `src/visualize_orgtype_flow_by_era.R`
   - output figure: `outputs/figures/orgtype_flow_great_society_vs_reagan.png`
   - output table: `outputs/analysis/orgtype_flow_great_society_vs_reagan.csv`
-  - scope: panethnic orgs only; periods defined by IRS incorporation year (`fnd_yr`)
+  - scope: panethnic orgs identified by naming rules, ML classifier, or both — plus ground-truth matches (`detection_method` ∈ `RE`, `both`, `ML`, `ground_truth`); periods by IRS incorporation year (`fnd_yr`)
   - design: alluvial flow with decreasing types (dark grey) stacked at top, increasing (light grey) at bottom; black separator lines between flows
 
 - **Population vs. organizational presence by urbanicity**
   - script: `src/visualize_population_org_urbanicity.R`
   - output figure: `outputs/figures/population_org_urbanicity_mismatch.png`
   - output table: `outputs/analysis/population_org_urbanicity_mismatch.csv`
-  - scope: panethnic orgs only; population from 2020 Census (county-level)
+  - scope: panethnic orgs identified by naming rules, ML classifier, or both — plus ground-truth matches (`detection_method` ∈ `RE`, `both`, `ML`, `ground_truth`); population from 2020 Census (county-level)
   - design: dumbbell plot (population share vs org share by urbanicity) paired with civic opportunity index bars; urbanicity classified by USDA RUCC 2013 codes (Urban = RUCC 1; Suburban = RUCC 2–3; Rural = RUCC 4–9)
   - civic opportunity index: average of membership, volunteering, events, and civic and political action indicators
 
@@ -379,6 +398,7 @@ Phase 08: Supervised ML validation — group classification + panethnic/ethnic p
   - `processed_data/ml_validation/candidate_predictions_fail_ml_filter.csv`
   - `processed_data/ml_validation/candidate_panethnic_predictions.csv`
   - `processed_data/ml_validation/panethnic_classifier_cv_metrics.csv`
+  - `processed_data/ml_validation/panethnic_classifier_fold_metrics.csv` (V7: per-fold accuracy, balanced accuracy, macro-F1, AUC for the panethnic ensemble)
 
 Example (Phase 08):
 
@@ -437,7 +457,7 @@ Scripts are numbered by pipeline stage. Core identification pipeline:
 - `src/03b_scrape_about_pages_browser.py` — browser-rendered scraper (Playwright) for JS-heavy pages; EIN-level resume support; writes `processed_data/org_matching/candidate_about_pages_browser.csv`
 - `src/04a_merge_about_pages_parts.py` — merges multi-worker part files; default dedupe key is `ein`
 - `src/04b_dedupe_about_pages.py` — deduplicates by `ein`; writes backup and `candidate_about_pages_unique.csv`
-- `src/04c_verify_about_page_ownership.py` — nullifies about-page text for confirmed URL mismatches (hard-coded EIN exclusions), self-reported IRS URL domain conflicts, and bot-blocked pages; writes `processed_data/org_matching/about_page_ownership_mismatches.csv`
+- `src/04c_verify_about_page_ownership.py` — nullifies about-page text for confirmed URL mismatches (hard-coded EIN exclusions), self-reported IRS URL domain conflicts, and bot-blocked pages; writes `processed_data/org_matching/about_page_ownership_mismatches.csv` and an advisory `about_page_review_candidates.csv` (rows where the scraped domain shares no token or acronym with the IRS name — flagged for inspection but not auto-nullified)
 - `src/05_reclassify_panethnic_constituency.py` — sentence-level reclassification for `ethnic_named` orgs; uses `sentence-transformers` (`all-MiniLM-L6-v2`) to score all sentences in the about-page text (no sentence cap) against panethnic constituency prototypes; requires a sentence mentioning panethnic groups with constituency/service framing above score and similarity thresholds; writes `processed_data/org_matching/panethnic_constituency_reclass.csv` and `processed_data/org_matching/panethnic_constituency_sentence_evidence.csv`
 - `src/06_enrich_org_civic_type.R` — joins all sources; assigns `detection_strategy`, `detection_method`, `urbanicity`, `org_type`; optionally joins `08` ML panethnic predictions; writes `processed_data/org_enriched/org_civic_enriched.csv` and strategy-count tables
 - `src/07_evaluate_org_classifier.R` — evaluates the rule-based org-type classifier against ground truth
@@ -447,6 +467,11 @@ Analysis scripts (not part of core identification):
 
 - `src/analyze_about_topics.R` — tags safety-net and democracy/organizing mentions; uses `misc/safety_net_dictionary.csv`
 - `src/select_gap_cases.R` — population-organization growth gap scoring and case selection
+
+Verification scripts (run independently after the relevant pipeline stage):
+
+- `src/verify_scrape_quality.py` — audits text coverage for `ethnic_named` candidates before reclassification; classifies each org as `no_text`, `very_short`, `short`, or `usable` broken out by panethnic group; writes `processed_data/verification/scrape_quality_summary.csv` and `scrape_quality_thin_pages.csv`
+- `src/verify_threshold_sensitivity.py` — replays reclassification decisions across a grid of `(min_score, min_similarity)` combinations on the pre-computed sentence evidence file (no re-embedding); writes `processed_data/verification/threshold_sensitivity.csv`
 
 Note:
 
@@ -483,7 +508,7 @@ Core identification pipeline (run in this order):
 5. *(optional)* re-scrape orgs with thin about pages (1–2 sentences): generate a candidates file of short-page orgs, run `03b` against it, and merge improved text back into `candidate_about_pages.csv` before step 6
 6. `src/04a_merge_about_pages_parts.py` + `src/04b_dedupe_about_pages.py` — merge/dedupe
 6b. `src/04c_verify_about_page_ownership.py` — URL ownership verification (removes confirmed mismatches, irs_url domain conflicts, bot-blocked pages)
-7. `src/05_reclassify_panethnic_constituency.py` — ethnic → panethnic reclassification (uses `all-MiniLM-L6-v2`; scans all sentences; default `--min_score 0.40 --min_similarity 0.40`)
+7. `src/05_reclassify_panethnic_constituency.py` — ethnic → panethnic reclassification (uses `all-MiniLM-L6-v2`; scans all sentences; default `--min_score 0.45 --min_similarity 0.40`)
 8. `src/08_train_validate_panethnic_ml.R` — ML classifiers (run before 06 so panethnic predictions are available)
 9. `src/06_enrich_org_civic_type.R` — final enrichment, joins ML output, adds urbanicity
 
@@ -533,3 +558,68 @@ FORCE_RERUN=true ./run_pipeline_01_06_and_shutdown.sh
 Current note:
 
 - This is a testing stage for pipeline construction and documentation; execution and threshold tuning are handled in the next iteration.
+
+## Pipeline Verification Checks
+
+Seven verification checks run alongside or after the core identification pipeline. Each produces output files in `processed_data/verification/` (or named alongside the stage output) that can be reviewed independently of downstream analyses.
+
+### V1 — Scrape quality audit (`src/verify_scrape_quality.py`)
+
+Characterizes the text coverage of the about-page scraping step before reclassification runs. For every `ethnic_named` candidate, text is classified as `no_text`, `very_short` (< 100 chars or < 2 sentences), `short` (100–399 chars or 2–4 sentences), or `usable` (≥ 400 chars or ≥ 5 sentences), broken out by inferred panethnic group. Candidates silently excluded from step 05 because they lack usable text are written to a separate review file, making the exclusion transparent and characterizable.
+
+Outputs: `processed_data/verification/scrape_quality_summary.csv`, `processed_data/verification/scrape_quality_thin_pages.csv`
+
+```bash
+python3 src/verify_scrape_quality.py \
+  --about_input processed_data/org_matching/candidate_about_pages.csv \
+  --candidates_input processed_data/org_matching/similar_org_candidates.csv \
+  --out_dir processed_data/verification
+```
+
+### V2 — URL ownership review candidates (`src/04c_verify_about_page_ownership.py`)
+
+In addition to auto-nullifying confirmed mismatches, junk text, and IRS URL domain conflicts, step `04c` now writes an advisory set of *review candidates*: rows where (a) no IRS self-reported URL is available to confirm the link and (b) the scraped domain shares no meaningful token or acronym with the IRS organization name. Text for these rows is **not** nullified (the heuristic has too many false positives for acronym-based domains), but they are flagged for manual inspection before reclassification results are finalized.
+
+Output: `processed_data/org_matching/about_page_review_candidates.csv`
+
+### V3 — Threshold sensitivity analysis (`src/verify_threshold_sensitivity.py`)
+
+Reads the pre-computed sentence evidence file from step 05 and applies a grid of `(min_score, min_similarity)` combinations — {0.35, 0.40, 0.45, 0.50} × {0.35, 0.40, 0.45} — to show how reclassification counts change. Does not re-embed any text; runs in seconds on the existing evidence CSV. The current default combination (0.45 × 0.40) is marked in the output.
+
+Output: `processed_data/verification/threshold_sensitivity.csv`
+
+```bash
+python3 src/verify_threshold_sensitivity.py \
+  --evidence_input processed_data/org_matching/panethnic_constituency_sentence_evidence.csv \
+  --out_dir processed_data/verification
+```
+
+### V4 — Reclassification audit sample (`src/05_reclassify_panethnic_constituency.py --sample_evidence_n`)
+
+Pass `--sample_evidence_n N` to step 05 to draw a random sample of N reclassified organizations and write their top-scoring evidence sentence, confidence score, and cosine similarity to a separate file. Supports manual quality review of the reclassification outputs without reading through the full evidence CSV.
+
+```bash
+python3 src/05_reclassify_panethnic_constituency.py \
+  --min_score 0.45 --min_similarity 0.40 \
+  --sample_evidence_n 50
+```
+
+Output: `processed_data/verification/reclassification_audit_sample.csv`
+
+### V5 — Duplicate EIN audit (`src/06_enrich_org_civic_type.R`)
+
+Step 06 now reports any EINs that appear in multiple source origins (e.g., an org matched from the ground-truth list and also picked up by the direct-panethnic name scan). Duplicate EINs are expected in some cases and do not indicate an error, but downstream analyses that count organizations by EIN should be aware of them. The audit file lists every duplicated EIN with its origin, detection strategy, and panethnic group for each appearance.
+
+Output: `processed_data/org_enriched/duplicate_ein_audit.csv` (written only when duplicates exist)
+
+### V6 — RE vs. ML disagreement audit (`src/06_enrich_org_civic_type.R`)
+
+Step 06 compares the rule-based panethnic classification (RE) against the ML predictions from step 08 and flags two types of disagreement: (a) organizations classified as panethnic by RE but labeled `ethnic` by the ML model; (b) organizations not classified as panethnic by RE but labeled `panethnic` by ML. Disagreements are not definitively errors — the RE and ML signals are complementary — but they identify cases worth reviewing when validating coverage decisions or explaining classification choices to reviewers. Requires step 08 to have been run first.
+
+Output: `processed_data/org_enriched/re_ml_disagreements.csv`
+
+### V7 — Per-fold stability metrics (`src/08_train_validate_panethnic_ml.R`)
+
+Step 08 now writes per-fold accuracy, balanced accuracy, macro-F1, and AUC for the panethnic vs. ethnic ensemble classifier, alongside the existing aggregate CV metrics. Fold-level stability can reveal whether classification performance degrades on particular subsets — for example, folds with a different proportion of Latino vs. Asian organizations or folds that contain more organizations with thin about-page text.
+
+Output: `processed_data/ml_validation/panethnic_classifier_fold_metrics.csv`
