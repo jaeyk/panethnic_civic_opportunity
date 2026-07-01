@@ -39,23 +39,23 @@ We validate panethnic classifications using two supervised machine learning task
 
 **Figure 1 — Org-type composition flow (`orgtype_flow_great_society_vs_reagan.png`)** compares the organizational type composition of panethnic organizations across two eras defined by IRS incorporation year: the 1960s–1970s (n = 131 Asian American; n = 176 Latino) and Post-1981 (n = 868 Asian American; n = 1,271 Latino). Panethnic organizations are those flagged by the rule-based naming rules, the ML panethnic classifier, or both — plus ground-truth-matched organizations (`detection_method ∈ RE, both, ML, ground_truth`). This union-of-methods approach retains RE-detected organizations regardless of ML confirmation, which is important because many genuine panethnic organizations lack sufficient about-page text for the classifier to evaluate; requiring ML confirmation would introduce selection bias toward organizations with a web presence. For each group, we compute the proportion of organizations in each type within each period and render the shifts as sigmoid Bézier ribbons. Types that declined in share after 1981 are stacked at the top of each bar (dark grey) and types that increased are stacked at the bottom (light grey), allowing the aggregate recomposition to be read directly from the area of each shaded region.
 
-**Figure 2 — Population vs. organizational presence by urbanicity (`population_org_urbanicity_mismatch.png`)** shows the mismatch between where the Asian American and Latino populations live and where panethnic organizations and civic opportunity are concentrated. For each group, we compare the population share by urbanicity tier (2020 Census county-level counts joined to USDA Rural-Urban Continuum Codes) against the organizational share by urbanicity tier among panethnic organizations flagged by the naming rules, the ML classifier, or both — plus ground-truth matches (`detection_method ∈ RE, both, ML, ground_truth`). This union-of-methods approach mirrors Figure 1 and retains RE-detected organizations regardless of ML confirmation, preserving orgs without sufficient about-page text for ML evaluation. Urbanicity is defined as: Urban (RUCC 1), Suburban (RUCC 2–3), and Rural (RUCC 4–9), consistent with the classification in `org_civic_enriched.csv`. A civic opportunity index — the average of four binary indicators (membership, volunteering, events, and civic and political action) from IRS activity records — is shown alongside to indicate the quality of civic infrastructure available by place type.
+**Figure 2 — Population vs. organizational presence by urbanicity (`population_org_urbanicity_mismatch.png`)** shows the mismatch between where the Asian American and Latino populations live and where panethnic organizations are concentrated, and whether that mismatch deepens when narrowing to civic opportunity organizations. For each group and urbanicity tier, a dumbbell shows three values: (1) the population share from the 2020 Census (county-level counts joined to USDA Rural-Urban Continuum Codes), (2) the share of all panethnic organizations, and (3) the share of civic opportunity organizations — those with any of the four IRS activity indicators (membership, volunteering, events, civic and political action). The panethnic organization set includes organizations flagged by the naming rules, the ML classifier, or both — plus ground-truth matches (`detection_method ∈ RE, both, ML, ground_truth`). Urbanicity is defined as: Urban (RUCC 1), Suburban (RUCC 2–3), and Rural (RUCC 4–9), consistent with the classification in `org_civic_enriched.csv`.
 
-  **Asian American** (n orgs: Urban 1,098; Suburban 134; Rural 20):
+  **Asian American** (all orgs: Urban 1,098; Suburban 134; Rural 20):
 
-  | Urbanicity | Population share | Org share | Civic opp. index |
+  | Urbanicity | Population share | All organizations | Civic opportunity organizations |
   | --- | ---: | ---: | ---: |
-  | Urban | 80.1% | 87.7% | 0.31 |
-  | Suburban | 17.6% | 10.7% | 0.25 |
-  | Rural | 2.2% | 1.6% | 0.11 |
+  | Urban | 80.1% | 87.7% | 90.3% |
+  | Suburban | 17.6% | 10.7% | 8.8% |
+  | Rural | 2.2% | 1.6% | 0.9% |
 
-  **Latino** (n orgs: Urban 1,457; Suburban 478; Rural 73):
+  **Latino** (all orgs: Urban 1,457; Suburban 478; Rural 73):
 
-  | Urbanicity | Population share | Org share | Civic opp. index |
+  | Urbanicity | Population share | All organizations | Civic opportunity organizations |
   | --- | ---: | ---: | ---: |
-  | Urban | 66.4% | 72.5% | 0.24 |
-  | Suburban | 27.1% | 23.8% | 0.24 |
-  | Rural | 6.6% | 3.6% | 0.14 |
+  | Urban | 66.4% | 72.6% | 73.2% |
+  | Suburban | 27.1% | 23.8% | 24.6% |
+  | Rural | 6.6% | 3.6% | 2.3% |
 
 ### Limitations
 
@@ -372,8 +372,8 @@ Current focus figures:
   - output figure: `outputs/figures/population_org_urbanicity_mismatch.png`
   - output table: `outputs/analysis/population_org_urbanicity_mismatch.csv`
   - scope: panethnic orgs identified by naming rules, ML classifier, or both — plus ground-truth matches (`detection_method` ∈ `RE`, `both`, `ML`, `ground_truth`); population from 2020 Census (county-level)
-  - design: dumbbell plot (population share vs org share by urbanicity) paired with civic opportunity index bars; urbanicity classified by USDA RUCC 2013 codes (Urban = RUCC 1; Suburban = RUCC 2–3; Rural = RUCC 4–9)
-  - civic opportunity index: average of membership, volunteering, events, and civic and political action indicators
+  - design: single dumbbell plot with three points per row — population share, all organizations share, and civic opportunity organizations share — by urbanicity tier; urbanicity classified by USDA RUCC 2013 codes (Urban = RUCC 1; Suburban = RUCC 2–3; Rural = RUCC 4–9)
+  - civic opportunity organizations: organizations with any of membership, volunteering, events, or civic and political action (`civic_any == 1`)
 
 Phase 08: Supervised ML validation — group classification + panethnic/ethnic prediction
 
