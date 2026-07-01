@@ -475,7 +475,7 @@ Analysis scripts (not part of core identification):
   - *Professional associations* — bar associations, lawyers associations, law student associations, foundations (n = 101: 60 Asian American, 41 Latino)
   - *Legal services & advocacy* — legal defense funds, legal resource centers, law caucuses/alliances (n = 10: 5 Asian American, 5 Latino)
 
-  **Median IRS incorporation year:**
+  **Median IRS incorporation year** (based on `fnd_yr` — see caveat below)**:**
 
   | Subtype | Group | n | Median | IQR |
   | --- | --- | ---: | ---: | --- |
@@ -484,7 +484,7 @@ Analysis scripts (not part of core identification):
   | Legal services & advocacy | Asian American | 5 | 1994 | 1978–1998 |
   | Legal services & advocacy | Latino | 5 | 1975 | 1972–2018 |
 
-  Legal services organizations are substantially older than professional associations, consistent with their roots in civil rights-era advocacy.
+  Legal services organizations are substantially older than professional associations, consistent with their roots in civil rights-era advocacy. However, these figures are based on `fnd_yr` (the IRS registration date of the current legal entity), which understates true organizational age when orgs have reorganized or merged under a new name. For example, Asian Americans Advancing Justice–Asian Law Caucus shows `fnd_yr` = 1998 but was founded in 1972; using true founding years would shift the Asian American Legal services median from 1994 to approximately 1978.
 
 Verification scripts (run independently after the relevant pipeline stage):
 
