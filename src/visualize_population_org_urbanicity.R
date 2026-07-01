@@ -1,18 +1,16 @@
 #!/usr/bin/env Rscript
-# Visualize population share vs org share and civic opportunity index by urbanicity
-# for panethnic Asian American and Latino organizations.
+# Visualize population share vs org share by urbanicity for panethnic orgs.
 #
 # Story: Asian American and Latino population growth is increasingly happening
-# outside urban cores (suburban, rural), but organizational infrastructure and
-# civic opportunity remain concentrated in urban areas — a mismatch that this
-# figure makes visible.
+# outside urban cores (suburban, rural), but organizational infrastructure
+# remains concentrated in urban areas — a mismatch this figure makes visible.
 #
-# Left panel:  dumbbell plot — population share vs org share by urbanicity
-# Right panel: civic opportunity index (avg of 4 dimensions) by urbanicity
-# Rows:        Asian American | Latino
+# Dumbbell plot: population share vs org share by urbanicity
+# Rows: Asian American | Latino
 
 library(data.table)
 library(ggplot2)
+library(ggrepel)
 library(jsonlite)
 library(scales)
 
@@ -80,20 +78,11 @@ org_totals <- pan[, .N, by = .(group_label, urbanicity)]
 org_totals[, org_share := N / sum(N), by = group_label]
 setnames(org_totals, "group_label", "group")
 
-# ── 3. Civic opportunity index by urbanicity (panethnic only) ─────────────────
-# Index = average of the four _final binary dimensions
-pan[, civ_index := rowMeans(
-  cbind(membership_final, volunteer_final, events_final, civic_action_final),
-  na.rm = TRUE
-)]
-
-civ_by_urban <- pan[, .(
-  civ_index = mean(civ_index, na.rm = TRUE),
-  n         = .N
-), by = .(group_label, urbanicity)]
-setnames(civ_by_urban, "group_label", "group")
-civ_by_urban[, group := factor(group, levels = c("Asian American", "Latino"))]
-civ_by_urban[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
+# ── 3. Civic opportunity org share by urbanicity (civic_any == 1) ─────────────
+civ_orgs <- pan[civic_any == 1]
+civ_totals <- civ_orgs[, .N, by = .(group_label, urbanicity)]
+civ_totals[, civ_org_share := N / sum(N), by = group_label]
+setnames(civ_totals, "group_label", "group")
 
 # ── 4. Merge and tidy ─────────────────────────────────────────────────────────
 dumbbell <- merge(pop_long, org_totals[, .(group, urbanicity, org_share)],
@@ -102,122 +91,120 @@ dumbbell <- merge(pop_long, org_totals[, .(group, urbanicity, org_share)],
 dumbbell[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
 dumbbell[, group := factor(group, levels = c("Asian American", "Latino"))]
 
-fwrite(merge(dumbbell, civ_by_urban[, .(group, urbanicity, civ_index)],
+dumbbell_civ <- merge(pop_long, civ_totals[, .(group, urbanicity, civ_org_share)],
   by = c("group", "urbanicity")
-), OUT_TABLE)
+)
+dumbbell_civ[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
+dumbbell_civ[, group := factor(group, levels = c("Asian American", "Latino"))]
+
+out_tbl <- merge(
+  dumbbell,
+  dumbbell_civ[, .(group, urbanicity, civ_org_share)],
+  by = c("group", "urbanicity")
+)
+fwrite(out_tbl, OUT_TABLE)
 cat("Table saved:", OUT_TABLE, "\n")
 
 # ── 5. Build plot ─────────────────────────────────────────────────────────────
 
-# Reshape dumbbell to long for proper legend
-dumb_long <- rbind(
-  dumbbell[, .(group, urbanicity, share = pop_share, measure = "Population")],
-  dumbbell[, .(group, urbanicity, share = org_share, measure = "Organizations")]
+# Merge all three shares; segment spans full range per row
+combined <- merge(
+  dumbbell[, .(group, urbanicity, pop_share, org_share)],
+  dumbbell_civ[, .(group, urbanicity, civ_org_share)],
+  by = c("group", "urbanicity")
 )
-dumb_long[, measure := factor(measure, levels = c("Population", "Organizations"))]
+combined[, seg_lo := pmin(pop_share, org_share, civ_org_share)]
+combined[, seg_hi := pmax(pop_share, org_share, civ_org_share)]
+combined[, urbanicity := factor(urbanicity, levels = URBAN_LEVELS)]
+combined[, group := factor(group, levels = c("Asian American", "Latino"))]
 
-# Panel A: dumbbell — population share vs org share
-p_dumb <- ggplot(dumbbell, aes(y = urbanicity)) +
+MEASURES <- c("Population", "All organizations", "Civic opportunity organizations")
+combined_long <- rbind(
+  combined[, .(group, urbanicity, share = pop_share,     measure = "Population")],
+  combined[, .(group, urbanicity, share = org_share,     measure = "All organizations")],
+  combined[, .(group, urbanicity, share = civ_org_share, measure = "Civic opportunity organizations")]
+)
+combined_long[, measure := factor(measure, levels = MEASURES)]
+
+p_combined <- ggplot(combined, aes(y = urbanicity)) +
   geom_segment(
-    aes(x = org_share, xend = pop_share, yend = urbanicity),
+    aes(x = seg_lo, xend = seg_hi, yend = urbanicity),
     color = "grey60", linewidth = 1.2
   ) +
   geom_point(
-    data = dumb_long,
+    data  = combined_long,
     aes(x = share, shape = measure, fill = measure),
-    size = 4, color = "grey20", stroke = 1.2
+    size = 5, color = "grey20", stroke = 1.2
+  ) +
+  geom_text_repel(
+    data  = combined_long[measure == "Population"],
+    aes(x = share, label = percent(share, accuracy = 1)),
+    nudge_y = 0.32, direction = "y", min.segment.length = 0,
+    segment.color = "grey50", segment.size = 0.4,
+    size = 4.2, color = "grey30", box.padding = 0.1
+  ) +
+  geom_text_repel(
+    data  = combined_long[measure == "All organizations"],
+    aes(x = share, label = percent(share, accuracy = 1)),
+    nudge_y = -0.32, direction = "y", min.segment.length = 0,
+    segment.color = "grey50", segment.size = 0.4,
+    size = 4.2, color = "grey20", box.padding = 0.1
+  ) +
+  geom_text_repel(
+    data  = combined_long[measure == "Civic opportunity organizations"],
+    aes(x = share, label = percent(share, accuracy = 1)),
+    nudge_y = 0.62, direction = "y", min.segment.length = 0,
+    segment.color = "grey50", segment.size = 0.4,
+    size = 4.2, color = "grey20", box.padding = 0.1
   ) +
   scale_shape_manual(
-    values = c("Population" = 21, "Organizations" = 16),
+    values = c("Population" = 21, "All organizations" = 16, "Civic opportunity organizations" = 18),
     name = NULL
   ) +
   scale_fill_manual(
-    values = c("Population" = "white", "Organizations" = "grey20"),
+    values = c("Population" = "white", "All organizations" = "grey20", "Civic opportunity organizations" = "grey20"),
     name = NULL
   ) +
   scale_x_continuous(
     labels = percent_format(accuracy = 1),
-    limits = c(0, 1), expand = expansion(mult = c(0.02, 0.05))
+    limits = c(0, 1), expand = expansion(mult = c(0.02, 0.08))
   ) +
   scale_y_discrete(limits = rev(URBAN_LEVELS)) +
   facet_wrap(~group, ncol = 1) +
   labs(
-    x     = "Share of group total (%)",
-    y     = NULL,
-    title = "Population vs. organizational presence"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    strip.text         = element_text(face = "bold", size = 13),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor   = element_blank(),
-    axis.text.y        = element_text(size = 12),
-    plot.title         = element_text(face = "bold", size = 13),
-    legend.position    = "bottom",
-    legend.text        = element_text(size = 12),
-    plot.margin        = margin(6, 10, 6, 6)
-  )
-
-# Panel B: civic opportunity index
-p_civ <- ggplot(civ_by_urban, aes(x = civ_index, y = urbanicity)) +
-  geom_col(fill = "grey40", width = 0.55) +
-  geom_text(aes(label = sprintf("%.2f", civ_index)),
-    hjust = -0.15, size = 3.8, color = "grey20"
-  ) +
-  scale_x_continuous(
-    limits = c(0, 0.55),
-    expand = expansion(mult = c(0.02, 0.05))
-  ) +
-  scale_y_discrete(limits = rev(URBAN_LEVELS)) +
-  facet_wrap(~group, ncol = 1) +
-  labs(
-    x     = "Civic opportunity index (0–1)",
-    y     = NULL,
-    title = "Civic opportunity index"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    strip.text         = element_text(face = "bold", size = 13),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor   = element_blank(),
-    axis.text.y        = element_blank(),
-    plot.title         = element_text(face = "bold", size = 13),
-    legend.position    = "bottom",
-    plot.margin        = margin(6, 10, 6, 2)
-  )
-
-# ── Combine with patchwork ────────────────────────────────────────────────────
-library(patchwork)
-
-p_combined <- p_dumb + p_civ +
-  plot_layout(widths = c(1.6, 1)) +
-  plot_annotation(
-    title    = "Panethnic organizations are more urban than the populations they serve",
-    caption  = paste0(
-      "Urbanicity defined by USDA Rural-Urban Continuum Codes (RUCC 2013): ",
+    x       = "Share of group total (%)",
+    y       = NULL,
+    title   = "Panethnic organizations are more urban than the populations they serve",
+    caption = paste0(
+      "Urbanicity defined by USDA Rural-Urban Continuum Codes (RUCC 2013).\n",
       "Urban = RUCC 1 (large metro); Suburban = RUCC 2–3 (smaller metro); Rural = RUCC 4–9 (non-metro).\n",
-      "Civic opportunity index = average of membership, volunteering, events, and civic and political action indicators."
-    ),
-    theme = theme(
-      plot.title = element_text(face = "bold", size = 15),
-      plot.subtitle = element_text(size = 12),
-      plot.caption = element_text(
-        size = 9, color = "grey30", hjust = 0,
-        margin = margin(t = 6)
-      )
+      "Civic opportunity organizations = organizations with any of: membership, volunteering, events, or civic and political action."
     )
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    strip.text         = element_text(face = "bold", size = 15),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.y        = element_text(size = 14),
+    axis.text.x        = element_text(size = 13),
+    axis.title.x       = element_text(size = 14),
+    plot.title         = element_text(face = "bold", size = 15),
+    legend.position    = "bottom",
+    legend.text        = element_text(size = 13),
+    plot.caption       = element_text(size = 10, color = "grey30", hjust = 0, margin = margin(t = 6)),
+    plot.margin        = margin(8, 12, 8, 8)
   )
 
-ggsave(OUT_FIG, p_combined, width = 13, height = 7, dpi = 180)
+ggsave(OUT_FIG, p_combined, width = 10, height = 8, dpi = 180)
 cat("Figure saved:", OUT_FIG, "\n")
 
 cat("\nSummary table:\n")
-print(merge(dumbbell, civ_by_urban[, .(group, urbanicity, civ_index)],
-  by = c("group", "urbanicity")
-)[
+print(out_tbl[
   order(group, urbanicity),
   .(group, urbanicity,
-    pop_share = round(pop_share, 3),
-    org_share = round(org_share, 3), civ_index = round(civ_index, 3)
+    pop_share     = round(pop_share, 3),
+    org_share     = round(org_share, 3),
+    civ_org_share = round(civ_org_share, 3)
   )
 ])
