@@ -467,6 +467,24 @@ Analysis scripts (not part of core identification):
 
 - `src/analyze_about_topics.R` — tags safety-net and democracy/organizing mentions; uses `misc/safety_net_dictionary.csv`
 - `src/select_gap_cases.R` — population-organization growth gap scoring and case selection
+- `src/identify_panethnic_orgs.R` — identifies panethnic Asian American and Latino legal organizations from `org_civic_enriched.csv`; classifies them into two subtypes; reports median IRS incorporation year by subtype and group; writes `outputs/analysis/panethnic_orgs_summary.csv` and `outputs/analysis/panethnic_legal_orgs_list.csv`
+
+  **Legal organization definition:** `detection_method ∈ {RE, both, ML, ground_truth}` AND IRS name contains legal keywords (`legal`, `law` as whole word, `lawyer`, `attorney`, `bar assoc`). Excluded: mental health counseling orgs (`counsel`/`counseling`) and law enforcement orgs (`law enforcement`, `peace officer`).
+
+  **Subtypes (first-match rule):**
+  - *Professional associations* — bar associations, lawyers associations, law student associations, foundations (n = 101: 60 Asian American, 41 Latino)
+  - *Legal services & advocacy* — legal defense funds, legal resource centers, law caucuses/alliances (n = 10: 5 Asian American, 5 Latino)
+
+  **Median IRS incorporation year:**
+
+  | Subtype | Group | n | Median | IQR |
+  | --- | --- | ---: | ---: | --- |
+  | Professional associations | Asian American | 60 | 2011 | 2003–2015 |
+  | Professional associations | Latino | 41 | 2008 | 1996–2015 |
+  | Legal services & advocacy | Asian American | 5 | 1994 | 1978–1998 |
+  | Legal services & advocacy | Latino | 5 | 1975 | 1972–2018 |
+
+  Legal services organizations are substantially older than professional associations, consistent with their roots in civil rights-era advocacy.
 
 Verification scripts (run independently after the relevant pipeline stage):
 
