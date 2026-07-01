@@ -21,6 +21,13 @@
 #                              Latino         1975 (IQR 1972-2018)
 #   Legal services orgs are substantially older than professional associations,
 #   consistent with their roots in civil rights-era advocacy.
+#
+# Caveat on fnd_yr: this field reflects the IRS registration date of the current
+#   legal entity, not the organization's true founding year. Organizations that
+#   reorganized or merged under a new legal name will show a later date. For
+#   example, Asian Americans Advancing Justice-Asian Law Caucus shows fnd_yr=1998
+#   but was actually founded in 1972. The true founding gap between legal services
+#   orgs and professional associations is likely larger than the IRS data suggest.
 
 library(data.table)
 
