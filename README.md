@@ -358,6 +358,19 @@ Phase 06: Visualization and communication
     | Foundations | 1.1% | 2.2% | +1.1 |
     | Research | 0.0% | 1.0% | +1.0 |
 
+  - **Illustrative organizations** (post-1981 `fnd_yr`, from `processed_data/org_enriched/org_civic_enriched.csv`):
+    - *Professional* — Asian Pacific American Bar Association of Indiana (2019); South Asian Bar Association of Philadelphia (2019); Asian Pacific Certified Public Accountants Association (2020); Society of Hispanic Professional Engineers, Washington DC Chapter (2019); Latino Business Student Association (2019); DC Hispanic Contractors Association (2019)
+    - *Hobby and sports* — Asian-American Youth Soccer Academy (2019); Bay Area Asian Sports (2002); Asian Golf Association (2003); Seattle Asian Sports Club (2006); Hispanic Soccer League (2020); JC Hispanic American Soccer School (2014)
+    - *Arts and cultural* — DisOrient Asian American Film Festival of Oregon (2019); Alliance of Chinese Culture & Arts USA (2019); Georgia Asian Music Association (2018); Latino Arts Initiative (2019); Latino Heritage Museum (2019); Latino Music Education Network (2020)
+
+  - **Reportable text:**
+
+    > Perhaps the legal profession is a unique case. To demonstrate that it is not, I again used IRS data to identify Asian American and Latino panethnic organizations and classified them into specific categories following Kim et al. (2025). Appendix C documents the underlying computational process used to process the data and visualize the results. Figure 23 compares the composition of panethnic organizations by organizational type across two eras defined by IRS incorporation year: the 1960s and 1970s (Asian American, n = 131; Latino, n = 176) and the post-1981 period (Asian American, n = 868; Latino, n = 1,271).
+    >
+    > One key finding is the increase in the proportion of professional organizations — from 2.3% to 14.7% of Asian American panethnic organizations and from 2.3% to 11.3% of Latino panethnic organizations — as well as hobby and sports organizations (Asian American: 1.5% to 10.0%; Latino: 0.0% to 5.4%) and arts and culture organizations (Asian American: 5.3% to 10.9%; Latino: 3.4% to 6.5%), which may appeal to people and groups with greater resources and more free time. Examples of this shift include professional groups such as the Asian Pacific American Bar Association of Indiana, the Society of Hispanic Professional Engineers, and the Latino Business Student Association; hobby and sports groups such as the Asian-American Youth Soccer Academy and the Hispanic Soccer League; and arts and culture groups such as the DisOrient Asian American Film Festival and the Latino Arts Initiative. The bottom line is that the rise of professional organizations is not limited to the legal profession.
+
+  - Caveat: percentages are shares of organizations *founded within* each era (composition of the incorporation cohort), not shares of the standing population of organizations at a given point in time. `org_type` is a machine/rule-assigned single label, so a small number of names (e.g., peace-officer associations) may sit under "Professional" for lack of a closer category — this does not affect the trends above, which are driven by many organizations, not edge cases.
+
 Current focus figures:
 
 - **Org-type composition flow (1960s–70s vs. Post-1981)**
